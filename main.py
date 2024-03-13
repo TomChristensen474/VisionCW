@@ -50,7 +50,9 @@ def get_intersection_point(line1, line2):
     rho2, theta2 = line2[0]
 
     # Check for parallel lines
-    if np.abs(theta1 - theta2) < 1:
+    # if np.abs(np.abs(theta1 - theta2) - np.pi) < 1e-6:
+    #     return None
+    if np.abs(theta1 - theta2) < 1e-1:
         return None
 
     a1 = np.cos(theta1)
@@ -69,7 +71,7 @@ def get_intersection_point(line1, line2):
     return (int(round(x)), int(round(y)))
 
 
-def get_mean_intersection(lines):
+def get_mean_intersection(img, lines):
     """
     This function takes a list of lines in (rho, theta) format and returns the mean intersection point.
 
@@ -86,8 +88,11 @@ def get_mean_intersection(lines):
             if intersection:
                 intersections.append(intersection)
 
-    #   if not intersections:
+    # if not intersections:
     #     return None
+    for x, y in intersections:
+        cv2.circle(img, (x, y), 3, (0, 255, 0), 1, cv2.LINE_AA)
+    cv2.imshow("intersections", img)
 
     # Calculate mean of intersection points
     x_sum, y_sum = 0, 0
@@ -109,7 +114,7 @@ def get_non_black_pixels(img):
 
     # Transpose to get individual coordinates in a list of tuples
     return list(zip(*non_black_pixels))
-
+    # return non_black_pixels
 
 def get_pixel_vectors(image, point):
     """
@@ -127,19 +132,22 @@ def get_pixel_vectors(image, point):
     vectors = []
     white_pixels = get_non_black_pixels(image)
     for white_pixel in white_pixels:
-        x = white_pixel[0]
-        y = white_pixel[1]
+        cv2.circle(image, (white_pixel[1], white_pixel[0]), 1, (255, 0, 0), 1, cv2.LINE_AA)
+    cv2.imshow("name", image)
+    for white_pixel in white_pixels:
+        x = white_pixel[1]
+        y = white_pixel[0]
         dx = x - point[0]
         dy = y - point[1]
         # Avoid division by zero for point itself
         if dx == 0 and dy == 0:
-            # vectors.append(np.array([0, 0]))
-            pass
+            vectors.append(np.array([0, 0]))
+            # pass
         else:
             # Normalize the vector
-            magnitude = np.sqrt(dx**2 + dy**2)
-            normalized_vector = np.array([dx / magnitude, dy / magnitude])
-            vectors.append(normalized_vector)
+            # magnitude = np.sqrt(dx**2 + dy**2)
+            # normalized_vector = np.array([dx / magnitude, dy / magnitude])
+            vectors.append(np.array([dx, dy]))
     return vectors
 
 
@@ -160,14 +168,13 @@ def kmeans_cluster_directions(vectors, k):
     data = np.float32(vectors).reshape(-1, 1, 2)
 
     # Define termination criteria
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1)
 
     # Perform KMeans clustering
-    ret, labels, centers = cv2.kmeans(
-        data, k, data, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
-    )
+    ret, labels, centers = cv2.kmeans(data, k, data, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
 
     return labels.flatten(), centers.reshape(k, 2)
+
 
 def get_cosine_similarity(v1, v2):
     dot_product = np.dot(v1, v2)
@@ -175,11 +182,21 @@ def get_cosine_similarity(v1, v2):
     magnitude_v2 = np.linalg.norm(v2)
     return dot_product / (magnitude_v1 * magnitude_v2)
 
+
 def detect_acute(img, intersection):
     vectors = get_pixel_vectors(img, intersection)
+    for vector in vectors:
+        cv2.arrowedLine(img, intersection, (intersection[0] + vector[0], intersection[1] + vector[1]), (0, 255, 0), 1)
+    cv2.imshow("Vectors", img)
     labels, centers = kmeans_cluster_directions(vectors, 2)
+
+    for vector in centers:
+        cv2.arrowedLine(img, intersection, (intersection[0] + int(vector[0]), intersection[1] + int(vector[1])), (0, 0, 255), 1)
+        cv2.imshow("Vectors", img)
     if get_cosine_similarity(centers[0], centers[1]) >= 0:
         return True
+    
+    return False
 
 
 def get_angles_in_image(img, debug_mode=False):
@@ -210,10 +227,10 @@ def get_angles_in_image(img, debug_mode=False):
 
     assert lines is not None, "No lines detected"
 
-    mean_intersection = get_mean_intersection(lines)
-    cv2.circle(cdst, mean_intersection, 3, (0, 255, 0), 1, cv2.LINE_AA)
+    mean_intersection = get_mean_intersection(cdst, lines)
 
     acute = detect_acute(cdst, mean_intersection)
+    print(acute)
 
     for i in range(0, len(lines)):
         rho = lines[i][0][0]
@@ -225,7 +242,8 @@ def get_angles_in_image(img, debug_mode=False):
         y0 = b * rho
         pt1 = (int(x0 + 1000 * (-b)), int(y0 + 1000 * (a)))
         pt2 = (int(x0 - 1000 * (-b)), int(y0 - 1000 * (a)))
-        # cv2.line(cdst, pt1, pt2, (0, 0, 255), 3, cv2.LINE_AA)
+        cv2.line(cdst, pt1, pt2, (0, 0, 255), 3, cv2.LINE_AA)
+    cv2.circle(cdst, mean_intersection, 3, (0, 255, 0), 1, cv2.LINE_AA)
 
     if debug_mode:
         cv2.imshow("Detected Lines (in red) - Standard Hough Line Transform", cdst)
@@ -269,7 +287,16 @@ def get_angles_in_image(img, debug_mode=False):
     # if (gradients[0] * gradients[1]) < 0:
     #     angle = 180 - (thetas[1] - thetas[0])
     # else:
-    angle = thetas[1] - thetas[0]
+    if acute:
+        if thetas[1] - thetas[0] > 90:
+            angle = 180 - (thetas[1] - thetas[0])
+        else:
+            angle = thetas[1] - thetas[0]
+    else:
+        if thetas[1] - thetas[0] > 90:
+            angle = thetas[1] - thetas[0]
+        else:
+            angle = 180 - (thetas[1] - thetas[0])
 
     # determine if acute or obtuse
     row_indexes, column_indexes = np.nonzero(edges)
@@ -291,21 +318,21 @@ def testTask1(folderName):
     # Calculate and provide the error in predicting the angle for each image
     task1Data = pd.read_csv(folderName + "/list.txt")
 
-    img = cv2.imread(os.path.join(folderName, "image4.png"))
+    img = cv2.imread(os.path.join(folderName, "image5.png"))
     assert img is not None, "file could not be read, check with os.path.exists()"
 
-    print(get_angles_in_image(img, True))
+    # print(get_angles_in_image(img, True))
 
-    # angles = []
-    # for files in os.listdir(folderName):
-    #     if files.endswith(".png"):
-    #         img = cv2.imread(os.path.join(folderName, files))
-    #         assert img is not None, "file could not be read, check with os.path.exists()"
+    angles = []
+    for files in os.listdir(folderName):
+        if files.endswith(".png"):
+            img = cv2.imread(os.path.join(folderName, files))
+            assert img is not None, "file could not be read, check with os.path.exists()"
 
-    #         angles.append(get_angles_in_image(img))
+            angles.append(get_angles_in_image(img, True))
 
-    # print(task1Data, angles)
-    # return angles
+    print(task1Data, angles)
+    return angles
 
 
 def testTask2(iconDir, testDir):
