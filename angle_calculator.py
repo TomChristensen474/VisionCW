@@ -8,23 +8,10 @@ from matplotlib import pyplot as plt
 
 
 def get_intersection_point(line1, line2):
-    """
-    This function takes two lines in parametric form (rho, theta) and returns the intersection point.
-
-    Args:
-        line1: A tuple containing (rho, theta) for the first line.
-        line2: A tuple containing (rho, theta) for the second line.
-
-    Returns:
-        A tuple containing (x, y) coordinates of the intersection point,
-        or None if the lines are parallel.
-    """
     rho1, theta1 = line1[0]
     rho2, theta2 = line2[0]
 
     # Check for parallel lines
-    # if np.abs(np.abs(theta1 - theta2) - np.pi) < 1e-6:
-    #     return None
     if np.abs(theta1 - theta2) < 1e-1:
         return None
 
@@ -41,7 +28,7 @@ def get_intersection_point(line1, line2):
         return None
     x = (c1 * b2 - c2 * b1) / denominator
     y = (a1 * c2 - a2 * c1) / denominator
-    return (int(round(x)), int(round(y)))
+    return (round(x), round(y))
 
 
 def get_mean_intersection(img, lines):
@@ -87,14 +74,14 @@ def get_non_black_pixels(img):
 
     # Transpose to get individual coordinates in a list of tuples
     return list(zip(*non_black_pixels))
-    # return non_black_pixels
+
 
 
 def get_pixel_vectors(image, point):
     vectors = []
     white_pixels = get_non_black_pixels(image)
 
-    # not sure why but x and y is flipped in the white_pixels list
+    # x and y is flipped because we transpose in get_non_black_pixels
     for white_pixel in white_pixels:
         cv2.circle(image, (white_pixel[1], white_pixel[0]), 1, (255, 0, 0), 1, cv2.LINE_AA)
     cv2.imshow("name", image)
@@ -128,7 +115,7 @@ def kmeans_cluster_directions(vectors, k):
 
     # Perform KMeans clustering
     _, _, centers = cv2.kmeans(data, k, data, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
-
+    print(centers.shape)
     return centers.reshape(k, 2)
 
 
