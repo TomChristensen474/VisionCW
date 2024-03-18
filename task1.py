@@ -15,8 +15,8 @@ def task1(folderName: str) -> float:
 
     for filename, actual_angle in image_files.values:
         image: Path = Path(folderName) / filename
-        # if image.stem != "image3":
-        # continue
+        # if image.stem != "image4":
+        #     continue
 
         predicted_angle = get_angle(image)
         error = abs(predicted_angle - actual_angle)
@@ -33,19 +33,20 @@ def task1(folderName: str) -> float:
 def get_angle(image_path: Path) -> float:
     # 0. read image
     image = read_image(image_path)
+    original_image = image.copy()
 
     # 1. get hough lines from image
     lines = hough_lines(image)
 
     intersection_point = get_intersection_point(lines[0], lines[1])
 
-    acute = detect_acute(image, intersection_point)
+    cv.waitKey(0)
 
-    # thetas = get_thetas_from_hough_lines(lines, image)
+    acute = detect_acute(original_image, intersection_point, True)
+    print(acute)
 
-    # thetas.sort()
-    # thetas = filter_similar_thetas(thetas)
     thetas = [lines[0].theta, lines[1].theta]
+    thetas.sort()
 
     assert len(thetas) == 2, "Error: More or less than 2 lines calculated"
 
@@ -172,15 +173,17 @@ def hough_lines(image: Image) -> list[HoughLine]:
     return lines
 
 def get_intersection_point(line1, line2):
+    theta1 = np.deg2rad(line1.theta)
+    theta2 = np.deg2rad(line2.theta)
     # Check for parallel lines
-    if np.abs(line1.theta - line2.theta) < 1e-1:
+    if np.abs(theta1 - theta2) < 1e-1:
         return None
 
-    a1 = np.cos(line1.theta)
-    b1 = np.sin(line1.theta)
+    a1 = np.cos(theta1)
+    b1 = np.sin(theta1)
     c1 = line1.rho
-    a2 = np.cos(line2.theta)
-    b2 = np.sin(line2.theta)
+    a2 = np.cos(theta2)
+    b2 = np.sin(theta2)
     c2 = line2.rho
 
     # Solve for intersection point
@@ -191,21 +194,12 @@ def get_intersection_point(line1, line2):
     y = (a1 * c2 - a2 * c1) / denominator
     return (round(x), round(y))
 
-def detect_acute(img, intersection, debug_mode=False):
+def detect_acute(img, intersection, debug_mode=False): # needs original image
+    # cv.cvtColor(img, cv.COLOR_GRAY2BGR)
     vectors = get_pixel_vectors(img, intersection)
-    # for vector in vectors:
-    #     cv.arrowedLine(img, intersection, (intersection[0] + vector[0], intersection[1] + vector[1]), (0, 255, 0), 1)
 
-    # if debug_mode:
-    #     cv.imshow("Vectors", img)
     centers = kmeans_cluster_directions(vectors, 2)
 
-    # for vector in centers:
-    #     cv.arrowedLine(img, intersection, (intersection[0] + int(vector[0]), intersection[1] + int(vector[1])), (0, 0, 255), 1)
-    
-    # if debug_mode:
-    #     cv.imshow("Vectors", img)
-        
     if get_cosine_similarity(centers[0], centers[1]) >= 0:
         return True
 
@@ -223,16 +217,11 @@ def get_non_black_pixels(img):
 
 def get_pixel_vectors(image, point):
     vectors = []
-    white_pixels = get_non_black_pixels(image)
-
-    # x and y is flipped because we transpose in get_non_black_pixels
-    for white_pixel in white_pixels:
-        cv.circle(image, (white_pixel[1], white_pixel[0]), 1, (255, 0, 0), 1, cv.LINE_AA)
-    cv.imshow("name", image)
+    white_pixels = list(white_points(image))
 
     for white_pixel in white_pixels:
-        x = white_pixel[1]
-        y = white_pixel[0]
+        x = white_pixel.x
+        y = white_pixel.y
         dx = x - point[0]
         dy = y - point[1]
         # Avoid division by zero for point itself
@@ -259,7 +248,7 @@ def kmeans_cluster_directions(vectors, k):
 
     # Perform KMeans clustering
     _, _, centers = cv.kmeans(data, k, data, criteria, 10, cv.KMEANS_RANDOM_CENTERS)
-    print(centers.shape)
+
     return centers.reshape(k, 2)
 
 def get_cosine_similarity(v1, v2):
