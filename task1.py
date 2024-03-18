@@ -15,7 +15,7 @@ def task1(folderName: str) -> float:
 
     for filename, actual_angle in image_files.values:
         image: Path = Path(folderName) / filename
-        # if image.stem != "image4":
+        # if image.stem != "image3":
         #     continue
 
         predicted_angle = get_angle(image)
@@ -121,7 +121,7 @@ def hough_lines(image: Image) -> list[HoughLine]:
     diagonal_length = int(np.sqrt(image.shape[0] ** 2 + image.shape[1] ** 2))
 
     rhos = np.linspace(-diagonal_length, diagonal_length, 1000)
-    thetas = np.linspace(-90, 90, 360, endpoint=False)
+    thetas = np.linspace(-90, 90, 640, endpoint=False)
 
     sin_thetas = np.sin(np.deg2rad(thetas))
     cos_thetas = np.cos(np.deg2rad(thetas))
@@ -167,8 +167,8 @@ def hough_lines(image: Image) -> list[HoughLine]:
         y2 = int(y0 - 1000 * (a))
         cv.line(image, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
-    cv.imshow("image", image)
-    cv.waitKey(0)
+    # cv.imshow("image", image)
+    # cv.waitKey(0)
 
     return lines
 
@@ -176,7 +176,7 @@ def get_intersection_point(line1, line2):
     theta1 = np.deg2rad(line1.theta)
     theta2 = np.deg2rad(line2.theta)
     # Check for parallel lines
-    if np.abs(theta1 - theta2) < 1e-1:
+    if np.abs(theta1 - theta2) < 1e-6:
         return None
 
     a1 = np.cos(theta1)
