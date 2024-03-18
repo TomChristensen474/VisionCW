@@ -15,7 +15,7 @@ def task1(folderName: str) -> float:
 
     for filename, actual_angle in image_files.values:
         image: Path = Path(folderName) / filename
-        # if image.stem != "image3":
+        # if image.stem != "image4":
         #     continue
 
         predicted_angle = get_angle(image)
@@ -26,7 +26,7 @@ def task1(folderName: str) -> float:
         )
 
         total_error += error
-
+    print(f"Total error: {total_error:.2f}")
     return total_error
 
 
@@ -38,14 +38,14 @@ def get_angle(image_path: Path) -> float:
     # 1. get hough lines from image
     lines = hough_lines(image)
 
-    intersection_point = get_intersection_point(lines[0], lines[1])
+    intersection_point = get_mean_intersection(image, lines)
 
-    cv.waitKey(0)
+    assert intersection_point is not None, "No intersection point found"
 
     acute = detect_acute(original_image, intersection_point, True)
-    print(acute)
 
-    thetas = [lines[0].theta, lines[1].theta]
+    thetas = [line.theta for line in lines]
+    thetas = filter_similar_thetas(thetas)
     thetas.sort()
 
     assert len(thetas) == 2, "Error: More or less than 2 lines calculated"
@@ -59,6 +59,35 @@ def get_angle(image_path: Path) -> float:
     # angle = get_angle_from_segments(segments[0], segments[1])
 
     # return angle
+
+
+def filter_similar_thetas(thetas):
+    for theta in thetas:
+        removed_thetas = []
+        thetas_to_average = []
+        removing = False
+
+        for t in thetas:
+            if abs(theta - t) < 5:
+                removed_thetas.append(t)
+                thetas_to_average.append(t)
+                # thetas.remove(t)
+                removing = True
+
+            elif abs(theta - (t - 180)) < 5:
+                removed_thetas.append(t)
+                thetas_to_average.append(t - 180)
+                removing = True
+
+        if removing:
+            mean_thetas = sum(thetas_to_average) / len(thetas_to_average)
+            if mean_thetas < 0:
+                mean_thetas += 180
+            thetas.append(mean_thetas)
+            for t in removed_thetas:
+                thetas.remove(t)
+    return thetas
+
 
 def calculate_angle(thetas, acute):
     if acute:
@@ -121,7 +150,7 @@ def hough_lines(image: Image) -> list[HoughLine]:
     diagonal_length = int(np.sqrt(image.shape[0] ** 2 + image.shape[1] ** 2))
 
     rhos = np.linspace(-diagonal_length, diagonal_length, 1000)
-    thetas = np.linspace(-90, 90, 640, endpoint=False)
+    thetas = np.linspace(-90, 90, 1000, endpoint=False)
 
     sin_thetas = np.sin(np.deg2rad(thetas))
     cos_thetas = np.cos(np.deg2rad(thetas))
@@ -139,8 +168,14 @@ def hough_lines(image: Image) -> list[HoughLine]:
 
             accumulator[rho_idx, theta_idx] += 1
 
-    bright_spots = find_local_maxima(accumulator, 2)
+    bright_spots = find_local_maxima(accumulator)
+
     # print(bright_spots)
+    # cv.circle(accumulator, (bright_spots[0].x, bright_spots[0].y), 2, (255, 0, 0), -1)
+    # cv.circle(accumulator, (bright_spots[1].x, bright_spots[1].y), 2, (255, 0, 0), -1)
+    # cv.circle(accumulator, (bright_spots[2].x, bright_spots[2].y), 2, (255, 0, 0), -1)
+    # cv.imshow("accumulator", accumulator)
+    # cv.waitKey(0)
 
     lines = []
     for bright_spot in bright_spots:
@@ -172,6 +207,41 @@ def hough_lines(image: Image) -> list[HoughLine]:
 
     return lines
 
+
+def get_mean_intersection(img, lines):
+    """
+    This function takes a list of lines in (rho, theta) format and returns the mean intersection point.
+
+    Args:
+        lines: A list of tuples containing (rho, theta) for each line segment.
+
+    Returns:
+        An array containing (x, y) coordinates of the mean intersection point
+    """
+    intersections = []
+    for i in range(len(lines) - 1):
+        for j in range(i + 1, len(lines)):
+            intersection = get_intersection_point(lines[i], lines[j])
+            if intersection:
+                intersections.append(intersection)
+
+    if not intersections:
+        return None
+    # for x, y in intersections:
+    #     cv.circle(img, (x, y), 3, (0, 255, 0), 1, cv.LINE_AA)
+    # cv.imshow("intersections", img)
+
+    # Calculate mean of intersection points
+    x_sum, y_sum = 0, 0
+    for x, y in intersections:
+        x_sum += x
+        y_sum += y
+    mean_x = int(round(x_sum / len(intersections)))
+    mean_y = int(round(y_sum / len(intersections)))
+    #   return intersections
+    return [mean_x, mean_y]
+
+
 def get_intersection_point(line1, line2):
     theta1 = np.deg2rad(line1.theta)
     theta2 = np.deg2rad(line2.theta)
@@ -194,7 +264,8 @@ def get_intersection_point(line1, line2):
     y = (a1 * c2 - a2 * c1) / denominator
     return (round(x), round(y))
 
-def detect_acute(img, intersection, debug_mode=False): # needs original image
+
+def detect_acute(img, intersection, debug_mode=False):  # needs original image
     # cv.cvtColor(img, cv.COLOR_GRAY2BGR)
     vectors = get_pixel_vectors(img, intersection)
 
@@ -205,6 +276,7 @@ def detect_acute(img, intersection, debug_mode=False): # needs original image
 
     return False
 
+
 def get_non_black_pixels(img):
     # Threshold for black (adjust if needed)
     black_thresh = 10
@@ -214,6 +286,7 @@ def get_non_black_pixels(img):
 
     # Transpose to get individual coordinates in a list of tuples
     return list(zip(*non_black_pixels))
+
 
 def get_pixel_vectors(image, point):
     vectors = []
@@ -251,11 +324,13 @@ def kmeans_cluster_directions(vectors, k):
 
     return centers.reshape(k, 2)
 
+
 def get_cosine_similarity(v1, v2):
     dot_product = np.dot(v1, v2)
     magnitude_v1 = np.linalg.norm(v1)
     magnitude_v2 = np.linalg.norm(v2)
     return dot_product / (magnitude_v1 * magnitude_v2)
+
 
 @dataclass
 class Point:
@@ -265,7 +340,7 @@ class Point:
 
 def white_points(image: Image) -> Iterator[Point]:
     """Find all white pixels in the image."""
-    is_white = image > 100
+    is_white = image > 230
     ys, xs = np.nonzero(is_white)
     for x, y in zip(xs, ys):
         yield Point(x, y)
@@ -278,7 +353,7 @@ class BrightSpot:
     brightness: np.ndarray
 
 
-def find_local_maxima(accumulator: np.ndarray, n: int = 2) -> list[BrightSpot]:
+def find_local_maxima(accumulator: np.ndarray) -> list[BrightSpot]:
     # divide the accumulator into a grid of cells
     CELL_SIZE = 50
 
@@ -292,21 +367,20 @@ def find_local_maxima(accumulator: np.ndarray, n: int = 2) -> list[BrightSpot]:
             # find the maxima in the cell
             maxima = np.argwhere(cell == cell.max())[0]
 
-            bright_spot = BrightSpot(
-                x=x + maxima[1], y=y + maxima[0], brightness=cell[maxima[0], maxima[1]]
-            )
+            bright_spot = BrightSpot(x=x + maxima[1], y=y + maxima[0], brightness=cell[maxima[0], maxima[1]])
             bright_spots.append(bright_spot)
 
     # sort the cells data
     bright_spots = sorted(bright_spots, key=lambda x: x.brightness, reverse=True)
+    bright_spots = list(filter(lambda bright_spot: bright_spot.brightness > 150, bright_spots))
 
     # for bright_spot in bright_spots[:2]:
     # cv.circle(accumulator, (bright_spot.x, bright_spot.y), 5, 255, -1)
     # cv.imshow("image", accumulator)
     # cv.waitKey(0)
 
-    # return top N bright spots
-    return bright_spots[:n]
+    # return bright spots above a brightness threshold
+    return bright_spots
 
 
 def get_segment_from_line(image: Image, line: HoughLine) -> Segment:
@@ -336,9 +410,7 @@ def get_angle_from_segments(seg1: Segment, seg2: Segment) -> float:
     vec1 = np.array([seg1.x2 - seg1.x1, seg1.y2 - seg1.y1])
     vec2 = np.array([seg2.x2 - seg2.x1, seg2.y2 - seg2.y1])
 
-    radians = np.arccos(
-        np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
-    )
+    radians = np.arccos(np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2)))
     return np.degrees(radians)
 
 
