@@ -43,7 +43,6 @@ def get_angle(image_path: Path) -> float:
     return angle
 
 
-
 def filter_similar_thetas(thetas):
     for theta in thetas:
         removed_thetas = []
@@ -253,9 +252,7 @@ class HoughAccumulator:
                 theta_wraparound_distance = (
                     abs(other_theta_idx + len(self.thetas) - theta_idx)
                     if theta_idx > other_theta_idx
-                    else abs(
-                        theta_idx + len(self.thetas) - other_theta_idx
-                    )
+                    else abs(theta_idx + len(self.thetas) - other_theta_idx)
                 )
                 distance = min(distance, theta_wraparound_distance)
 
@@ -319,36 +316,32 @@ def hough_segments(image: Image) -> list[Segment]:
     intersection_y = np.mean([point.y for point in points_in_common])
 
     # get other end of both segments
-    points_further_from_intersection: list[Point] = []
+    points_further_from_intersection: list[tuple[float, float]] = []
 
     # for each segment
     for most_voted_point in most_voted_points:
 
-        furthest_point = None
-        furthest_point_distance = 0
+        # sort the points on this segment by distance
+        distance_from_intersection = lambda vote: np.sqrt(
+            (vote.point.x - intersection_x) ** 2 + (vote.point.y - intersection_y) ** 2
+        )
+        sorted_points_on_segment = sorted(
+            most_voted_point.votes, key=distance_from_intersection, reverse=True
+        )
 
-        # for each point on segment
-        for vote in most_voted_point.votes:
-            point = vote.point
+        # get the average of the 5 furthest points
+        tip_x = np.mean([vote.point.x for vote in sorted_points_on_segment[:20]])
+        tip_y = np.mean([vote.point.y for vote in sorted_points_on_segment[:20]])
 
-            distance_from_intersection = np.sqrt(
-                (point.x - intersection_x) ** 2 + (point.y - intersection_y) ** 2
-            )
-
-            if distance_from_intersection > furthest_point_distance:
-                furthest_point = point
-                furthest_point_distance = distance_from_intersection
-
-        assert furthest_point is not None
-        points_further_from_intersection.append(furthest_point)
+        points_further_from_intersection.append((float(tip_x), float(tip_y)))
 
     segments: list[Segment] = []
-    for segment_tip in points_further_from_intersection:
+    for segment_tip_x, segment_tip_y in points_further_from_intersection:
         segment = Segment(
             float(intersection_x),
             float(intersection_y),
-            float(segment_tip.x),
-            float(segment_tip.y),
+            float(segment_tip_x),
+            float(segment_tip_y),
         )
         segments.append(segment)
 
@@ -399,7 +392,9 @@ def get_angle_from_segments(seg1: Segment, seg2: Segment) -> float:
     vec1 = np.array([seg1.x2 - seg1.x1, seg1.y2 - seg1.y1])
     vec2 = np.array([seg2.x2 - seg2.x1, seg2.y2 - seg2.y1])
 
-    radians = np.arccos(np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2)))
+    radians = np.arccos(
+        np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+    )
     return np.degrees(radians)
 
 
