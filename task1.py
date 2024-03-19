@@ -15,7 +15,7 @@ def task1(folderName: str) -> float:
 
     for filename, actual_angle in image_files.values:
         image: Path = Path(folderName) / filename
-        # if image.stem != "image4":
+        # if image.stem != "image9":
         #     continue
 
         predicted_angle = get_angle(image)
@@ -33,32 +33,15 @@ def task1(folderName: str) -> float:
 def get_angle(image_path: Path) -> float:
     # 0. read image
     image = read_image(image_path)
-    original_image = image.copy()
 
-    # 1. get hough lines from image
-    lines = hough_lines(image)
+    # 1. get hough lines + segments from image
+    segments = hough_segments(image)
 
-    intersection_point = get_mean_intersection(image, lines)
+    # 2. get angle from segments
+    angle = get_angle_from_segments(segments[0], segments[1])
 
-    assert intersection_point is not None, "No intersection point found"
+    return angle
 
-    acute = detect_acute(original_image, intersection_point, True)
-
-    thetas = [line.theta for line in lines]
-    thetas = filter_similar_thetas(thetas)
-    thetas.sort()
-
-    assert len(thetas) == 2, "Error: More or less than 2 lines calculated"
-
-    return calculate_angle(thetas, acute)
-
-    # # 2. get segments from hough lines
-    # segments = [get_segment_from_line(image, line) for line in lines]
-
-    # # 3. get angle from segments
-    # angle = get_angle_from_segments(segments[0], segments[1])
-
-    # return angle
 
 
 def filter_similar_thetas(thetas):
@@ -119,10 +102,10 @@ def read_image(path: Path) -> Image:
 
 @dataclass
 class Segment:
-    x1: int
-    y1: int
-    x2: int
-    y2: int
+    x1: float
+    y1: float
+    x2: float
+    y2: float
 
 
 @dataclass
@@ -143,7 +126,161 @@ class HoughLine:
         return abs(predicted_rho - self.rho) < 3
 
 
-def hough_lines(image: Image) -> list[HoughLine]:
+@dataclass
+class HoughVote:
+    point: "Point"
+    rho: float
+    theta: float
+
+
+@dataclass
+class HoughLocalMaxima:
+    rho: float
+    theta: float
+    rho_idx: int
+    theta_idx: int
+    votes: list[HoughVote]
+
+
+class HoughAccumulator:
+    def __init__(self, rhos: np.ndarray, thetas: np.ndarray):
+        self.rhos = rhos
+        self.thetas = thetas
+
+        self.matrix: list[list[list[HoughVote]]] = [
+            [[] for _ in range(len(thetas))] for _ in range(len(rhos))
+        ]
+
+    def get_idx(self, val: float, arr: np.ndarray) -> int:
+        # https://stackoverflow.com/a/26026189
+        idx = arr.searchsorted(val, side="left")
+        # note: this is much faster than abs().argmin(), but
+        # truncates instead of rounding. in practice this means
+        # get_idx(5.9999) will return the same as get_idx(5) if
+        # arr only has whole numbers.
+
+        return int(idx)
+
+    def rho_idx(self, rho: float) -> int:
+        return self.get_idx(rho, self.rhos)
+
+    def theta_idx(self, theta: float) -> int:
+        return self.get_idx(theta, self.thetas)
+
+    def add_vote(self, point: "Point", rho: float, theta: float):
+        rho_idx = self.rho_idx(rho)
+        theta_idx = self.theta_idx(theta)
+        vote = HoughVote(point, rho, theta)
+
+        self.matrix[rho_idx][theta_idx].append(vote)
+
+    def accumulator_array(self) -> np.ndarray:
+        arr = np.array([[len(points) for points in row] for row in self.matrix])
+
+        # normalize to 0-255
+        max_brightness = float(arr.max())
+        arr = arr / (max_brightness)
+        arr = arr * 255
+        arr = arr.astype(np.uint8)
+
+        return arr
+
+    def local_maxima(self, n: int = 2) -> list["HoughLocalMaxima"]:
+        # divide the accumulator into a grid of cells
+        CELLS_PER_DIM = 10
+        CELL_RHO_SIZE = len(self.rhos) // CELLS_PER_DIM
+        CELL_THETA_SIZE = len(self.thetas) // CELLS_PER_DIM
+
+        accumulator = self.accumulator_array()
+        local_maxima: list[HoughLocalMaxima] = []
+
+        for rho_cell_idx in range(0, accumulator.shape[0], CELL_RHO_SIZE):
+            for theta_cell_idx in range(0, accumulator.shape[1], CELL_THETA_SIZE):
+                # get the cell
+                cell = accumulator[
+                    rho_cell_idx : rho_cell_idx + CELL_RHO_SIZE,
+                    theta_cell_idx : theta_cell_idx + CELL_THETA_SIZE,
+                ]
+
+                # find the xy of the maximum in the cell
+                max_idxs = np.argwhere(cell == cell.max())[0]
+                rho_idx_in_cell = max_idxs[0]
+                theta_idx_in_cell = max_idxs[1]
+
+                if cell[rho_idx_in_cell, theta_idx_in_cell] == 0:
+                    continue  # whole cells is 0s, maxima isn't here
+
+                rho_idx = rho_cell_idx + rho_idx_in_cell
+                theta_idx = theta_cell_idx + theta_idx_in_cell
+
+                # calculate average rho and theta of points
+                votes: list[HoughVote] = self.matrix[rho_idx][theta_idx]
+                rho = np.mean([vote.rho for vote in votes])
+                theta = np.mean([vote.theta for vote in votes])
+
+                local_maximum = HoughLocalMaxima(
+                    float(rho), float(theta), rho_idx, theta_idx, votes
+                )
+                local_maxima.append(local_maximum)
+
+        local_maxima = sorted(local_maxima, key=lambda x: len(x.votes), reverse=True)
+
+        # handle the case where the cell boundary crosses a hough bright point,
+        # so both local maxima refer to the same hough line
+        # i.e. they are right next to each other, next to the cell boundary
+        MIN_DISTANCE = min(CELL_RHO_SIZE, CELL_THETA_SIZE) / 8
+
+        n_local_maxima: list[HoughLocalMaxima] = []
+        for local_maximum in local_maxima:
+            rho_idx = local_maximum.rho_idx
+            theta_idx = local_maximum.theta_idx
+
+            # check if this point is too close to another already in
+            # n_local_maxima
+            add_to_maxima = True
+
+            for i, other_maximum in enumerate(n_local_maxima):
+                other_rho_idx = other_maximum.rho_idx
+                other_theta_idx = other_maximum.theta_idx
+
+                # manhattan distance for optimisation reasons
+                rho_distance = abs(rho_idx - other_rho_idx)
+                theta_distance = abs(theta_idx - other_theta_idx)
+                distance = rho_distance + theta_distance
+
+                # edge case: also take into account wrap around distance
+                # in theta axis, i.e. 89 and -89 are only 2 degrees apart
+                theta_wraparound_distance = (
+                    abs(other_theta_idx + len(self.thetas) - theta_idx)
+                    if theta_idx > other_theta_idx
+                    else abs(
+                        theta_idx + len(self.thetas) - other_theta_idx
+                    )
+                )
+                distance = min(distance, theta_wraparound_distance)
+
+                if distance < MIN_DISTANCE:
+                    # we are too close to that point, assume both we both
+                    # represent the same line
+
+                    # question is, which one of us should stay
+                    if len(local_maximum.votes) > len(other_maximum.votes):
+                        n_local_maxima[i] = local_maximum  # we win
+
+                    add_to_maxima = False
+                    break
+
+            if add_to_maxima:
+                n_local_maxima.append(local_maximum)
+
+                if len(n_local_maxima) >= n:
+                    break
+
+        # return top N bright spots
+        return n_local_maxima
+
+
+def hough_segments(image: Image) -> list[Segment]:
     # get all white pixels in the image
     points = list(white_points(image))
 
@@ -152,10 +289,12 @@ def hough_lines(image: Image) -> list[HoughLine]:
     rhos = np.linspace(-diagonal_length, diagonal_length, 1000)
     thetas = np.linspace(-90, 90, 1000, endpoint=False)
 
+    # to avoid re-calculating them every loop
     sin_thetas = np.sin(np.deg2rad(thetas))
     cos_thetas = np.cos(np.deg2rad(thetas))
 
-    accumulator = np.zeros((len(rhos), len(thetas)), dtype=np.uint8)
+    # accumulator = np.zeros((len(rhos), len(thetas)), dtype=np.uint8)
+    accumulator = HoughAccumulator(rhos, thetas)
 
     for point in points:
         x = point.x
@@ -164,178 +303,65 @@ def hough_lines(image: Image) -> list[HoughLine]:
         for theta_idx, theta in enumerate(thetas):
 
             rho = x * cos_thetas[theta_idx] + y * sin_thetas[theta_idx]
-            rho_idx = np.abs(rhos - rho).argmin()
+            # rho_idx = np.abs(rhos - rho).argmin()
 
-            accumulator[rho_idx, theta_idx] += 1
+            # accumulator[rho_idx, theta_idx] += 1
+            accumulator.add_vote(point, rho, theta)
 
-    bright_spots = find_local_maxima(accumulator)
+    # bright_spots = find_local_maxima(accumulator, 2)
+    most_voted_points = accumulator.local_maxima(2)  # i.e. both segments
 
-    # print(bright_spots)
-    # cv.circle(accumulator, (bright_spots[0].x, bright_spots[0].y), 2, (255, 0, 0), -1)
-    # cv.circle(accumulator, (bright_spots[1].x, bright_spots[1].y), 2, (255, 0, 0), -1)
-    # cv.circle(accumulator, (bright_spots[2].x, bright_spots[2].y), 2, (255, 0, 0), -1)
-    # cv.imshow("accumulator", accumulator)
-    # cv.waitKey(0)
+    # get intersection point
+    points_in_common = set([vote.point for vote in most_voted_points[0].votes]) & set(
+        [vote.point for vote in most_voted_points[1].votes]
+    )
+    intersection_x = np.mean([point.x for point in points_in_common])
+    intersection_y = np.mean([point.y for point in points_in_common])
 
-    lines = []
-    for bright_spot in bright_spots:
-        rho_idx = bright_spot.y
-        theta_idx = bright_spot.x
+    # get other end of both segments
+    points_further_from_intersection: list[Point] = []
 
-        rho = rhos[rho_idx]
-        theta = thetas[theta_idx]
+    # for each segment
+    for most_voted_point in most_voted_points:
 
-        line = HoughLine(rho, theta)
-        lines.append(line)
+        furthest_point = None
+        furthest_point_distance = 0
 
-    for line in lines:
-        rho = line.rho
-        theta = np.deg2rad(line.theta)
+        # for each point on segment
+        for vote in most_voted_point.votes:
+            point = vote.point
 
-        a = np.cos(theta)
-        b = np.sin(theta)
-        x0 = a * rho
-        y0 = b * rho
-        x1 = int(x0 + 1000 * (-b))
-        y1 = int(y0 + 1000 * (a))
-        x2 = int(x0 - 1000 * (-b))
-        y2 = int(y0 - 1000 * (a))
-        cv.line(image, (x1, y1), (x2, y2), (255, 0, 0), 2)
+            distance_from_intersection = np.sqrt(
+                (point.x - intersection_x) ** 2 + (point.y - intersection_y) ** 2
+            )
 
-    # cv.imshow("image", image)
-    # cv.waitKey(0)
+            if distance_from_intersection > furthest_point_distance:
+                furthest_point = point
+                furthest_point_distance = distance_from_intersection
 
-    return lines
+        assert furthest_point is not None
+        points_further_from_intersection.append(furthest_point)
 
+    segments: list[Segment] = []
+    for segment_tip in points_further_from_intersection:
+        segment = Segment(
+            float(intersection_x),
+            float(intersection_y),
+            float(segment_tip.x),
+            float(segment_tip.y),
+        )
+        segments.append(segment)
 
-def get_mean_intersection(img, lines):
-    """
-    This function takes a list of lines in (rho, theta) format and returns the mean intersection point.
-
-    Args:
-        lines: A list of tuples containing (rho, theta) for each line segment.
-
-    Returns:
-        An array containing (x, y) coordinates of the mean intersection point
-    """
-    intersections = []
-    for i in range(len(lines) - 1):
-        for j in range(i + 1, len(lines)):
-            intersection = get_intersection_point(lines[i], lines[j])
-            if intersection:
-                intersections.append(intersection)
-
-    if not intersections:
-        return None
-    # for x, y in intersections:
-    #     cv.circle(img, (x, y), 3, (0, 255, 0), 1, cv.LINE_AA)
-    # cv.imshow("intersections", img)
-
-    # Calculate mean of intersection points
-    x_sum, y_sum = 0, 0
-    for x, y in intersections:
-        x_sum += x
-        y_sum += y
-    mean_x = int(round(x_sum / len(intersections)))
-    mean_y = int(round(y_sum / len(intersections)))
-    #   return intersections
-    return [mean_x, mean_y]
-
-
-def get_intersection_point(line1, line2):
-    theta1 = np.deg2rad(line1.theta)
-    theta2 = np.deg2rad(line2.theta)
-    # Check for parallel lines
-    if np.abs(theta1 - theta2) < 1e-6:
-        return None
-
-    a1 = np.cos(theta1)
-    b1 = np.sin(theta1)
-    c1 = line1.rho
-    a2 = np.cos(theta2)
-    b2 = np.sin(theta2)
-    c2 = line2.rho
-
-    # Solve for intersection point
-    denominator = a1 * b2 - a2 * b1
-    if np.abs(denominator) < 1e-6:
-        return None
-    x = (c1 * b2 - c2 * b1) / denominator
-    y = (a1 * c2 - a2 * c1) / denominator
-    return (round(x), round(y))
-
-
-def detect_acute(img, intersection, debug_mode=False):  # needs original image
-    # cv.cvtColor(img, cv.COLOR_GRAY2BGR)
-    vectors = get_pixel_vectors(img, intersection)
-
-    centers = kmeans_cluster_directions(vectors, 2)
-
-    if get_cosine_similarity(centers[0], centers[1]) >= 0:
-        return True
-
-    return False
-
-
-def get_non_black_pixels(img):
-    # Threshold for black (adjust if needed)
-    black_thresh = 10
-
-    # Find non-zero pixels (non-black)
-    non_black_pixels = np.where(img > black_thresh)
-
-    # Transpose to get individual coordinates in a list of tuples
-    return list(zip(*non_black_pixels))
-
-
-def get_pixel_vectors(image, point):
-    vectors = []
-    white_pixels = list(white_points(image))
-
-    for white_pixel in white_pixels:
-        x = white_pixel.x
-        y = white_pixel.y
-        dx = x - point[0]
-        dy = y - point[1]
-        # Avoid division by zero for point itself
-        if dx == 0 and dy == 0:
-            vectors.append(np.array([0, 0]))
-            # pass
-        else:
-            # Normalize the vector
-            magnitude = np.sqrt(dx**2 + dy**2)
-            # normalized_vector = np.array([dx / magnitude, dy / magnitude]) # TODO PUT THIS BACK IN
-            vectors.append(np.array([dx, dy]))
-    return vectors
-
-
-def kmeans_cluster_directions(vectors, k):
-    """
-    As seen in docs: https://docs.opencv.org/3.4/d1/d5c/tutorial_py_kmeans_opencv.html
-    """
-    # Convert vectors to float32 for KMeans
-    data = np.float32(vectors).reshape(-1, 1, 2)
-
-    # Define termination criteria as seen in
-    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 10, 1)
-
-    # Perform KMeans clustering
-    _, _, centers = cv.kmeans(data, k, data, criteria, 10, cv.KMEANS_RANDOM_CENTERS)
-
-    return centers.reshape(k, 2)
-
-
-def get_cosine_similarity(v1, v2):
-    dot_product = np.dot(v1, v2)
-    magnitude_v1 = np.linalg.norm(v1)
-    magnitude_v2 = np.linalg.norm(v2)
-    return dot_product / (magnitude_v1 * magnitude_v2)
+    return segments
 
 
 @dataclass
 class Point:
     x: int
     y: int
+
+    def __hash__(self) -> int:
+        return hash((self.x, self.y))
 
 
 def white_points(image: Image) -> Iterator[Point]:
@@ -344,43 +370,6 @@ def white_points(image: Image) -> Iterator[Point]:
     ys, xs = np.nonzero(is_white)
     for x, y in zip(xs, ys):
         yield Point(x, y)
-
-
-@dataclass
-class BrightSpot:
-    x: int
-    y: int
-    brightness: np.ndarray
-
-
-def find_local_maxima(accumulator: np.ndarray) -> list[BrightSpot]:
-    # divide the accumulator into a grid of cells
-    CELL_SIZE = 50
-
-    bright_spots = []
-
-    for y in range(0, accumulator.shape[0], CELL_SIZE):
-        for x in range(0, accumulator.shape[1], CELL_SIZE):
-            # get the cell
-            cell = accumulator[y : y + CELL_SIZE, x : x + CELL_SIZE]
-
-            # find the maxima in the cell
-            maxima = np.argwhere(cell == cell.max())[0]
-
-            bright_spot = BrightSpot(x=x + maxima[1], y=y + maxima[0], brightness=cell[maxima[0], maxima[1]])
-            bright_spots.append(bright_spot)
-
-    # sort the cells data
-    bright_spots = sorted(bright_spots, key=lambda x: x.brightness, reverse=True)
-    bright_spots = list(filter(lambda bright_spot: bright_spot.brightness > 150, bright_spots))
-
-    # for bright_spot in bright_spots[:2]:
-    # cv.circle(accumulator, (bright_spot.x, bright_spot.y), 5, 255, -1)
-    # cv.imshow("image", accumulator)
-    # cv.waitKey(0)
-
-    # return bright spots above a brightness threshold
-    return bright_spots
 
 
 def get_segment_from_line(image: Image, line: HoughLine) -> Segment:
