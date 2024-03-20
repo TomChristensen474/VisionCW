@@ -30,11 +30,26 @@ def extract_patches_from_image(input_image):
     image_patches: List[ImagePatch] = [p1]
     return image_patches
 
-def calculate_patch_similarity(patch1, patch2) -> float:
-    # TODO: use similarity score function (e.g. SDD / block matching)
 
-    # TODO: add normalization of intensity
-    return 0.0
+def calculate_patch_similarity(patch1, patch2, ssd_match:bool = True, cross_corr_match:bool = False) -> float:
+    def ssd_normalized(patch1, patch2):
+        norm_patch1 = patch1 - np.mean(patch1)
+        norm_patch2 = patch2 - np.mean(patch2)
+        return np.sum(np.square(norm_patch1 - norm_patch2))
+
+    if (ssd_match == cross_corr_match):
+        raise ValueError("Choose correlation matching or ssd matching!")
+
+    match_score: float 
+    if ssd_match:
+        match_score = ssd_normalized(patch1=patch1, patch2=patch2)
+    elif cross_corr_match:
+        # TODO: add option for this
+        pass
+    else:
+        raise ValueError("Choose correlation matching or ssd matching!")
+
+    return match_score
 
 def template_matching(input_image, template_image):
     IX = len(input_image)
