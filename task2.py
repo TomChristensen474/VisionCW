@@ -25,7 +25,7 @@ def task2(folderName: str):
         # # Create rotated templates
         # templates = create_rotated_templates(templates)
 
-        icon = [file, image]
+        icon = [file, templates]
         icons.append(icon)
 
     # Load test images
@@ -66,24 +66,22 @@ def find_matching_icon(image, icons) -> str:
         # )
 
         # slide icon over image
-        for icon_name, template in icons:
-            resized_template = cv.resize(
-                template,
-                (int(icon_size * scale_factor), int(icon_size * scale_factor)),
-                interpolation=cv.INTER_LINEAR,
-            )
+        for icon_name, templates in icons:
+            for template in templates:
+                resized_template = cv.resize(
+                    template,
+                    (int(icon_size * scale_factor), int(icon_size * scale_factor)),
+                    interpolation=cv.INTER_LINEAR,
+                )
 
-            corr_matrix = match_template(image, resized_template)
-            # print(corr_matrix.min(), icon_name)
-            if corr_matrix.min() < min_difference:
-                min_difference = corr_matrix.min()
-                best_template = icon_name
-            # cv.imshow("template", resized_template)
-            cv.imshow("image", item)
-            # cv.waitKey(0)
+                corr_matrix = match_template(image, resized_template)
+
+                if corr_matrix.min() < min_difference:
+                    min_difference = corr_matrix.min()
+                    best_template = icon_name
+            
         print(best_template, min_difference)
-        print("\n")
-        # break
+
     cv.imshow("item", image)
     cv.waitKey(0)
 
@@ -114,10 +112,6 @@ def get_bounding_boxes(grayscale_image):
     # Threshold image
     _, threshold = cv.threshold(grayscale_image, 240, 255, cv.THRESH_BINARY_INV)
 
-    # Show threshold for debugging
-    # cv.imshow("threshold", threshold)
-    # cv.waitKey(0)
-
     # Find contours
     contours, _ = cv.findContours(threshold, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
@@ -128,10 +122,6 @@ def get_bounding_boxes(grayscale_image):
         # print(x, y, w, h)
         bounding_boxes.append((x, y, w, h))
         cv.rectangle(grayscale_image, (x, y), (x + w, y + h), (200, 0, 0), 2)
-
-    # Show bounding boxes for debugging
-    # cv.imshow("img", grayscale_image)
-    # cv.waitKey(0)
 
     return bounding_boxes
 
