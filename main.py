@@ -36,6 +36,7 @@ def testTask1(folderName):
     # Calculate and provide the error in predicting the angle for each image
     task1Data["error"] = abs(task1Data["AngleInDegrees"] - task1Data["predAngles"])
     print(task1Data)
+    print(f"Total error: {np.sum(task1Data['error']) / len(task1Data['error'])}")
 
     # return (Acc, TPR, FPR, FNR)
 
