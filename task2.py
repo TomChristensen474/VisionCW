@@ -12,7 +12,6 @@ import pandas as pd
 import math
 
 
-
 @dataclass
 class Icon:
     top: int
@@ -21,20 +20,27 @@ class Icon:
     right: int
     label: str
 
-
 @dataclass
 class TestImage:
     name: str
     icons: List[Icon]
 
+@dataclass
+class Rectangle:
+    x1: int
+    y1: int
+    x2: int
+    y2: int
 
 @dataclass
 class Match:
     label: str
     min_difference: float
-
+    bbox: Rectangle | None
 
 def task2(folderName: str):
+    version = 3
+
     annotations_path = Path(folderName) / "annotations"
     icon_dataset_path = Path("IconDataset/png")
     test_images = []
@@ -57,7 +63,7 @@ def task2(folderName: str):
         templates = create_scaled_templates(image, 7)
 
         # Create rotated templates
-        templates.extend(create_rotated_templates(templates))
+        # templates.extend(create_rotated_templates(templates))
 
         icon = [file, templates]
         icons.append(icon)
@@ -69,62 +75,86 @@ def task2(folderName: str):
         # Load test image
         image = cv.imread(os.path.join(images, file))
 
-        matches = find_matching_icons(image, icons)
+        matches = find_matching_icons(image, icons, version)
         found_matches.append(matches)
 
+    accuracies = []
     for i, image in enumerate(test_images):
         actual_icons = [icon.label for icon in image.icons]
         found_matches_labels = [match.label for match in found_matches[i]]
-        accuracy = len(set(actual_icons) & set(found_matches_labels)) / len(actual_icons)
-        print(f"Test image: {image.name}" + ", Accuracy: " + str(accuracy) + "%")
+        accuracy = len(set(actual_icons) & set(found_matches_labels)) / len(
+            actual_icons
+        )
+        accuracies.append(accuracy)
+        print(f"Test image: {image.name}" + ", Accuracy: " + str(accuracy*100) + "%")
         print(f"Actual icons: {actual_icons}")
         print(f"Found matches: {found_matches_labels}")
-        
-        print()
 
+    print()
+    print(f"Average accuracy: {np.average(accuracies) * 100}%")
 
-def find_matching_icons(image, icons) -> List[Match]:
-
-    image = cv.resize(image, (64, 64), interpolation=cv.INTER_LINEAR)
+def find_matching_icons_3a(image, icons) -> List[Match]:
+    # image = cv.resize(image, (512, 512), interpolation=cv.INTER_LINEAR)
 
     # Get bounding boxes
-    # grayscale_image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
-    # bounding_boxes = get_bounding_boxes(grayscale_image)
-    # icon_size = 512
-
-    # for x, y, w, h in bounding_boxes:
-    #     min_difference = math.inf
-    #     best_template = ""
-    #     item = image[y : y + h, x : x + w]
-    #     cv.rectangle(image, (x, y), (x + w, y + h), (200, 0, 0), 2)
-
-    # bounding_box_size = (w, h)
-    # scale_factor = w / icon_size
-    # cv.putText(
-    #     image, label, (x - 10, y - 10), cv.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 2, cv.LINE_AA
-    # )
-
-    # slide icon over image
-    # for label, templates in icons:
-    #     for template in templates:
-    #         # resized_template = cv.resize(
-    #         #     template,
-    #         #     (int(icon_size * scale_factor), int(icon_size * scale_factor)),
-    #         #     interpolation=cv.INTER_LINEAR,
-    #         # )
-
-    #         corr_matrix = match_template(image, template)
-
-    #         if corr_matrix is not None:
-    #             if corr_matrix.min() < min_difference:
-    #                 min_difference = corr_matrix.min()
-    #                 best_template = label
-
+    grayscale_image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    bounding_boxes = get_bounding_boxes(grayscale_image)
+    icon_size = 512
     matches = []
 
-    for i, (label, templates) in enumerate(icons):
+    for x, y, w, h in bounding_boxes:
         min_difference = math.inf
         best_template = ""
+        bbox_match = None
+        bounding_box = image[y : y + h, x : x + w]
+        cv.rectangle(image, (x, y), (x + w, y + h), (200, 0, 0), 2)
+
+        if w < h:
+            scale_factor = h / icon_size
+        else:
+            scale_factor = w / icon_size
+
+        # slide icon over image
+        for label, templates in icons:
+            for template in templates:
+                resized_template = cv.resize(
+                    template,
+                    (int(icon_size * scale_factor), int(icon_size * scale_factor)),
+                    interpolation=cv.INTER_LINEAR,
+                )
+
+                if resized_template.shape[0] > bounding_box.shape[0] or resized_template.shape[1] > bounding_box.shape[1]:
+                    # pad bounding_box to match template size
+                    pad_height = resized_template.shape[0] - bounding_box.shape[0]
+                    pad_width = resized_template.shape[1] - bounding_box.shape[1]
+                    padded_bounding_box = np.pad(bounding_box, ((0, pad_height), (0, pad_width), (0, 0)), mode='constant')
+
+                    bounding_box = padded_bounding_box
+
+                corr_matrix = match_template(bounding_box, resized_template)
+
+                if corr_matrix is not None:
+                    if corr_matrix.min() < min_difference:
+                        min_difference = corr_matrix.min()
+                        best_template = label
+                        bbox = Rectangle(x, y, x + w, y + h)
+
+        cv.putText(image, best_template, (x, y), cv.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 2, cv.LINE_AA)
+        # print(best_template)
+        matches.append(Match(Path(best_template).stem, min_difference, bbox_match))
+    # cv.imshow("image", image)
+    # cv.waitKey(0)  
+
+    return matches
+
+def find_matching_icons_1(image, icons) -> List[Match]:
+    image = cv.resize(image, (64, 64), interpolation=cv.INTER_LINEAR)
+    matches = []
+
+    for label, templates in icons:
+        min_difference = math.inf
+        best_template = ""
+        bbox_match = None
         for template in templates:
             corr_matrix = match_template(image, template)
 
@@ -132,7 +162,10 @@ def find_matching_icons(image, icons) -> List[Match]:
                 if corr_matrix.min() < min_difference:
                     min_difference = corr_matrix.min()
                     best_template = label
-        matches.append(Match(label, min_difference))
+                    x1 = corr_matrix.argmin(axis=0)[0]
+                    x2 = corr_matrix.argmin(axis=1)[0]
+                    bbox_match = Rectangle(x1, x2, x1 + template.shape[0], x2 + template.shape[1])
+        matches.append(Match(Path(label).stem, min_difference, bbox_match))
 
     matches = sorted(matches, key=lambda x: x.min_difference)
     # print()
@@ -141,6 +174,12 @@ def find_matching_icons(image, icons) -> List[Match]:
     # cv.waitKey(0)
 
     return filter_matches(matches, 0.05)
+
+def find_matching_icons(image, icons, version) -> List[Match]:
+    if version == 3:
+        return find_matching_icons_3a(image, icons)
+    
+    return find_matching_icons_1(image, icons)
 
 
 def filter_matches(matches: List[Match], threshold: float) -> List[Match]:
@@ -152,17 +191,23 @@ def match_template(image, template):
     image_height, image_width, _ = image.shape
     template_height, template_width, _ = template.shape
 
-    if template_height >= image_height or template_width >= image_width:
+
+    if template_height > image_height or template_width > image_width:
         return None
 
     # create a result matrix to store the correlation values
-    result = np.zeros((image_height - template_height + 1, image_width - template_width + 1))
+    result = np.zeros(
+        (image_height - template_height + 1, image_width - template_width + 1)
+    )
 
     # iterate through the image and calculate the correlation
     for y in range(image_height - template_height + 1):
         for x in range(image_width - template_width + 1):
             result[x, y] = calculate_patch_similarity(
-                image[y : y + template_height, x : x + template_width], template, True, False
+                image[y : y + template_height, x : x + template_width],
+                template,
+                True,
+                False,
             )
 
     return result
@@ -179,12 +224,26 @@ def get_bounding_boxes(grayscale_image):
     bounding_boxes = []
     for contour in contours:
         x, y, w, h = cv.boundingRect(contour)
-        # print(x, y, w, h)
-        bounding_boxes.append((x, y, w, h))
-        cv.rectangle(grayscale_image, (x, y), (x + w, y + h), (200, 0, 0), 2)
+        if w > h:
+            bounding_boxes.append((x, y, w, w))
+        else:
+            bounding_boxes.append((x, y, h, h))
 
+    bounding_boxes = filter_bboxes_within(bounding_boxes)
     return bounding_boxes
 
+def filter_bboxes_within(bounding_boxes):
+    bboxes_to_filter = []
+    for i, bbox1 in enumerate(bounding_boxes):
+        for j, bbox2 in enumerate(bounding_boxes):
+            if i != j:
+                x1, y1, w1, h1 = bbox1
+                x2, y2, w2, h2 = bbox2
+                if x1 >= x2 and y1 >= y2 and x1 < x2 + w2 and y1 < y2 + h2:
+                    if (w2 * h2) > (w1 * h1):
+                        bboxes_to_filter.append(bbox1)
+    filtered_bboxes = [bbox for bbox in bounding_boxes if bbox not in bboxes_to_filter]
+    return filtered_bboxes
 
 def create_scaled_templates(image, num_scales=5):
     scaled_templates = []
@@ -210,7 +269,9 @@ def rotate_image(image, rotation):
 
 
 def downsample(image, scale_factor=0.5):
-    downsampled_size = int(image.shape[0] * scale_factor), int(image.shape[1] * scale_factor)
+    downsampled_size = int(image.shape[0] * scale_factor), int(
+        image.shape[1] * scale_factor
+    )
     # gaussian blur image
     image = cv.GaussianBlur(image, (5, 5), 0)
     # scale down image
