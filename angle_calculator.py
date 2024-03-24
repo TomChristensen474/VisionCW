@@ -5,7 +5,7 @@ import pandas as pd
 import os
 import math
 from matplotlib import pyplot as plt
-
+from canny import Canny
 
 def get_intersection_point(line1, line2):
     rho1, theta1 = line1[0]
@@ -115,7 +115,7 @@ def kmeans_cluster_directions(vectors, k):
 
     # Perform KMeans clustering
     _, _, centers = cv2.kmeans(data, k, data, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
-    print(centers.shape)
+
     return centers.reshape(k, 2)
 
 
@@ -160,8 +160,8 @@ def get_thetas_from_hough_lines(lines, img, debug_mode=False):
         y0 = b * rho
         pt1 = (int(x0 + 1000 * (-b)), int(y0 + 1000 * (a)))
         pt2 = (int(x0 - 1000 * (-b)), int(y0 - 1000 * (a)))
-        if debug_mode:
-            cv2.line(img, pt1, pt2, (0, 0, 255), 3, cv2.LINE_AA)
+
+        cv2.line(img, pt1, pt2, (0, 0, 255), 3, cv2.LINE_AA)
 
     return thetas
 
@@ -211,12 +211,9 @@ def calculate_angle(thetas, acute):
 
 def get_angles_in_image(img, debug_mode=False):
 
-    gaussian = cv2.GaussianBlur(img, (9, 9), 0)
-    if debug_mode:
-        cv2.imshow("Gaussian", gaussian)
-        cv2.waitKey(0)
+    # edges = cv2.Canny(gaussian, 100, 200, None, 5)
+    edges = Canny(img)
 
-    edges = cv2.Canny(gaussian, 100, 200, None, 5)
     if debug_mode:
         cv2.imshow("Canny", edges)
         cv2.waitKey(0)
@@ -239,6 +236,10 @@ def get_angles_in_image(img, debug_mode=False):
         cv2.imshow("Detected Lines (in red) - Standard Hough Line Transform", cdst)
         # cv2.imshow("Original", img)
         cv2.waitKey(0)
+
+    cv2.imshow("Detected Lines (in red) - Standard Hough Line Transform", cdst)
+    # cv2.imshow("Original", img)
+    cv2.waitKey(0)
 
     thetas.sort()
     thetas = filter_similar_thetas(thetas)
