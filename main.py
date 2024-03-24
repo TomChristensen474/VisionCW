@@ -29,7 +29,10 @@ def testTask1(folderName):
             img = cv2.imread(os.path.join(folderName, file))
             assert img is not None, "file could not be read, check with os.path.exists()"
 
-            angles.append(get_angles_in_image(img, False))
+            # angles.append(get_angles_in_image(img))
+            angle = get_angles_in_image(img)
+            angles.append(angle)
+            print(angle)
 
     task1Data.insert(2, "predAngles", angles, True)
 

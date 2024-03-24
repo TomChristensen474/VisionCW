@@ -211,7 +211,7 @@ def calculate_angle(thetas, acute):
 
 def get_angles_in_image(img, debug_mode=False):
 
-    # edges = cv2.Canny(gaussian, 100, 200, None, 5)
+    # edges = cv2.Canny(img, 100, 200, None, 5)
     edges = Canny(img)
 
     if debug_mode:
@@ -244,6 +244,7 @@ def get_angles_in_image(img, debug_mode=False):
     thetas.sort()
     thetas = filter_similar_thetas(thetas)
 
-    assert len(thetas) == 2, "Error: More or less than 2 lines calculated"
+    assert not len(thetas) > 2, "Error: More than 2 Hough lines calculated"
+    assert not len(thetas) < 2, "Error: Less than 2 Hough lines calculated"
 
     return calculate_angle(thetas, acute)
