@@ -34,6 +34,11 @@ def get_angle(image_path: Path) -> float:
     # 0. read image
     image = read_image(image_path)
 
+    # tmp: thin image
+    thinner = Thinner()
+    _, image = cv.threshold(image, 200, 255, cv.THRESH_BINARY)
+    image = thinner.thin_image(image)
+
     # 1. get hough lines + segments from image
     segments = hough_segments(image)
 
@@ -41,6 +46,39 @@ def get_angle(image_path: Path) -> float:
     angle = get_angle_from_segments(segments[0], segments[1])
 
     return angle
+
+
+class Thinner:
+    def __init__(self):
+        # J's
+        self.structuring_elements = [
+            np.array([[0, 0, 0], [0, 1, 0], [1, 1, 1]], dtype=np.uint8),
+            np.array([[0, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=np.uint8),
+        ]
+
+    # input: binary image
+    # output: thinned binary image
+    # thinning of an image I by a structuring element J is:
+    # thin(I,J) = I - hit-and-miss(I,J)
+    def thin_image(self, image_binary):
+        I = image_binary.copy()
+        while True:
+            prev_I = I.copy()
+            for J in self.structuring_elements:
+                hit_and_miss_I_J = cv.morphologyEx(I, cv.MORPH_HITMISS, J)
+                thin_I_J = cv.subtract(I, hit_and_miss_I_J)
+            if np.array_equal(prev_I, thin_I_J):
+                return thin_I_J
+            I = thin_I_J
+
+
+# if __name__ == "__main__":
+#     image = cv.imread('./Task1Dataset/image4.png')
+#     gray_image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+#     _, binary_image = cv.threshold(gray_image, 120, 255, cv.THRESH_BINARY)
+
+#     thinner = Thinner()
+#     thinned_img = thinner.thin_image(binary_image)
 
 
 def filter_similar_thetas(thetas):
@@ -217,9 +255,7 @@ class HoughAccumulator:
                 rho = np.mean([vote.rho for vote in votes])
                 theta = np.mean([vote.theta for vote in votes])
 
-                local_maximum = HoughLocalMaxima(
-                    float(rho), float(theta), rho_idx, theta_idx, votes
-                )
+                local_maximum = HoughLocalMaxima(float(rho), float(theta), rho_idx, theta_idx, votes)
                 local_maxima.append(local_maximum)
 
         local_maxima = sorted(local_maxima, key=lambda x: len(x.votes), reverse=True)
@@ -330,8 +366,8 @@ def hough_segments(image: Image) -> list[Segment]:
         )
 
         # get the average of the 5 furthest points
-        tip_x = np.mean([vote.point.x for vote in sorted_points_on_segment[:20]])
-        tip_y = np.mean([vote.point.y for vote in sorted_points_on_segment[:20]])
+        tip_x = np.mean([vote.point.x for vote in sorted_points_on_segment[:10]])
+        tip_y = np.mean([vote.point.y for vote in sorted_points_on_segment[:10]])
 
         points_further_from_intersection.append((float(tip_x), float(tip_y)))
 
@@ -392,9 +428,7 @@ def get_angle_from_segments(seg1: Segment, seg2: Segment) -> float:
     vec1 = np.array([seg1.x2 - seg1.x1, seg1.y2 - seg1.y1])
     vec2 = np.array([seg2.x2 - seg2.x1, seg2.y2 - seg2.y1])
 
-    radians = np.arccos(
-        np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
-    )
+    radians = np.arccos(np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2)))
     return np.degrees(radians)
 
 
