@@ -41,8 +41,12 @@ class Match:
 def task2(folderName: str):
     version = 3
 
-    annotations_path = Path(folderName) / "annotations"
-    icon_dataset_path = Path("IconDataset/png")
+    this_file = Path(__file__)
+    datasets_folder = this_file.parent.parent.parent / "datasets"
+    dataset_folder = datasets_folder / folderName
+
+    annotations_path = dataset_folder / "annotations"
+    icon_dataset_path = datasets_folder / "IconDataset" / "png"
     test_images = []
 
     # Load test results

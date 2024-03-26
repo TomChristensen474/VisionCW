@@ -16,7 +16,11 @@ def render(image: Image):
 
 
 def task1(folderName: str) -> float:
-    list_file = Path(folderName) / "list.txt"
+    this_file = Path(__file__)
+    datasets_folder = this_file.parent.parent.parent / "datasets"
+    dataset_folder = datasets_folder / folderName
+
+    list_file = dataset_folder / "list.txt"
     image_files = pd.read_csv(list_file)
 
     total_error = 0
