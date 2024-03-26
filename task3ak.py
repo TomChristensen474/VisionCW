@@ -22,7 +22,7 @@ def get_blobs(img):
     img_gray = cv.cvtColor(img_gaussian, cv.COLOR_BGR2GRAY)
     
     kernel_size = 3
-    img_laplacian = cv.Laplacian(img_gray, cv.CV_16S, ksize=kernel_size)
+    img_laplacian = cv.Laplacian(img_gray, cv.CV_16S, ksize=kernel_size, scale=0.5)
     img_output = cv.convertScaleAbs(img_laplacian)
     cv.imshow("", img_output)
     cv.waitKey(0)
