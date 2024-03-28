@@ -1,3 +1,5 @@
+from typing import Iterator
+
 import cv2 as cv
 import numpy as np
 
@@ -11,6 +13,9 @@ class PyramidLevel:
         self.scales = {}
 
     def scaled(self, scale: float):
+        if scale == 1:
+            return self.image
+        
         if scale in self.scales:
             return self.scales[scale]
 
@@ -21,16 +26,23 @@ class PyramidLevel:
 
 
 class GaussianPyramid:
-    def __init__(self, image: Image, n: int = 5):
+    def __init__(self, image: Image, n: int = 3):
         self.image = image
-        self.pyramid = [image]
+
+        first_level = PyramidLevel(image)
+        self.pyramid: list[PyramidLevel] = [first_level]
 
         for _ in range(1, n):
-            next_level = cv.pyrDown(self.pyramid[-1])
+            next_image = cv.pyrDown(self.pyramid[-1].image)
+            next_level = PyramidLevel(next_image)
             self.pyramid.append(next_level)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index) -> PyramidLevel:
         return self.pyramid[index]
     
-    # def matches(self, other: "GaussianPyramid") -> float:
+    def __iter__(self) -> Iterator[PyramidLevel]:
+        return iter(self.pyramid)
+    
+    def __len__(self) -> int:
+        return len(self.pyramid)
         
