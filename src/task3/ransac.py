@@ -11,7 +11,7 @@ class Ransac:
 
     def __init__(self, distance_threshold: float = 0.5, sample_points_num: int = 100):
         self.distance_threshold = distance_threshold
-        self.sample_points_num = 
+        self.sample_points_num = sample_points_num
 
 
     # random sampling of points
