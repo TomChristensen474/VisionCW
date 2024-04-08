@@ -19,9 +19,9 @@ class Ransac:
         self.sample_points_num = sample_points_num
 
     # takes the points not fitted to line for calculation
-    def calculate_inliers_and_outliers(self, m_term:float, c_term:float, unselected_points: List[Point]) -> Tuple[int,int]:
-        inliers_count = 0
-        outliers_count = 0
+    def calculate_inliers_and_outliers(self, m_term:float, c_term:float, unselected_points: List[Point]) -> Tuple[List[Point],List[Point]]:
+        inliers = []
+        outliers = []
 
         # d = |ax1 + by1 + c| / (a^2+b^2)^1/2
         # where p(x1,x2) and ax + by + c = 0, 
@@ -33,11 +33,11 @@ class Ransac:
 
             distance = calculate_distance_from_line(x1=point.x, y1=point.y, a=m_term, c=c_term) 
             if distance <= self.distance_threshold:
-                inliers_count += 1
+                inliers.append(point)
             else:
-                outliers_count += 1
+                outliers.append(point)
         
-        return inliers_count, outliers_count
+        return inliers, outliers
 
 
     # random sampling of points for line fitting and inlier outlier calculation
@@ -64,15 +64,28 @@ class Ransac:
         coefficients = np.polyfit(np.asarray(x_coords), np.asarray(y_coords), 1)
         m, c = coefficients
         return m,c
+    
+    def run_ransac(self, points: List[Point], iterations=5) -> Tuple[List[Point], LineEquation]:
+        best_outlier_count = float("inf")  # less outliers is better
+        best_points = []
+        best_line = None
 
-    def run_ransac(self, points: List[Point]):
+        for i in range(iterations):
+            selected_points, unselected_points = self.sample_points(points=points)
+            m,c = self.fit_line(selected_points=selected_points)
+            inliers, outliers = self.calculate_inliers_and_outliers(m_term=m, c_term=c, unselected_points=unselected_points)
+            
+            if len(outliers) < best_outlier_count:
+                best_points = inliers
+                best_line = LineEquation(m=m,c=c)
+                best_outlier_count = len(outliers)
 
-        selected_points, unselected_points = self.sample_points(points=points)
-        m,c = self.fit_line(selected_points=selected_points)
-        inliers, outliers = self.calculate_inliers_and_outliers(m_term=m, c_term=c, unselected_points=unselected_points)
-        line = LineEquation(m=m,c=c)
+        if not best_points or not best_line:  # if empty arry or best line is none
+            raise ValueError("no points were found")
+
+        return best_points, best_line
 
 if __name__ == '__main__':
     rsc = Ransac()
     points = [Point(1,6), Point(3,7)]
-    rsc.run_ransac(points=points)
+    new_points = rsc.run_ransac(points=points)
