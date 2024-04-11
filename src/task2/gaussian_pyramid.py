@@ -8,11 +8,11 @@ Image = np.ndarray
 
 
 class PyramidLevel:
-    def __init__(self, image):
+    def __init__(self, image: Image):
         self.image = image
-        self.scales = {}
+        self.scales: dict[float, Image] = {}
 
-    def scaled(self, scale: float):
+    def scaled(self, scale: float) -> Image:
         if scale == 1:
             return self.image
         

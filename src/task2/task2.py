@@ -1,3 +1,4 @@
+import dataclasses
 from dataclasses import dataclass
 from natsort import natsorted
 from pathlib import Path
@@ -13,8 +14,10 @@ import math
 
 from gaussian_pyramid import GaussianPyramid
 
+Image = np.ndarray
 
-def print(s= ""):
+
+def print(s=""):
     tqdm.write(str(s))
 
 
@@ -40,12 +43,79 @@ class Rectangle:
     x2: int
     y2: int
 
+    def expanded(self, margin: int, img_dimensions: tuple[int, int]) -> "Rectangle":
+        max_x, max_y = img_dimensions
+        max_x2, max_y2 = max_x - margin, max_y - margin
+
+        neg_x, pos_x = margin, margin
+        neg_y, pos_y = margin, margin
+
+        if self.x1 < margin:
+            neg_x = self.x1
+            pos_x += margin - self.x1
+        elif self.x2 > max_x2:
+            pos_x = max_x - self.x2
+            neg_x += margin - (max_x - self.x2)
+
+        if self.y1 < margin:
+            neg_y = self.y1
+            pos_y += margin - self.y1
+        elif self.y2 > max_y2:
+            pos_y = max_y - self.y2
+            neg_y += margin - (max_y - self.y2)
+
+        return Rectangle(
+            int(self.x1 - neg_x),
+            int(self.y1 - neg_y),
+            int(self.x2 + pos_x),
+            int(self.y2 + pos_y),
+        )
+
     def __mul__(self, other: float):
         return Rectangle(
             int(self.x1 * other),
             int(self.y1 * other),
             int(self.x2 * other),
             int(self.y2 * other),
+        )
+
+
+@dataclass
+class RatioRectangle:
+    # to preserve bounding boxes for different
+    # all between 0 and 1
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+    @staticmethod
+    def from_bbox(bbox: Rectangle, img_dimensions: tuple[int, int]):
+        img_width, img_height = img_dimensions
+        return RatioRectangle(
+            bbox.x1 / img_width,
+            bbox.y1 / img_height,
+            bbox.x2 / img_width,
+            bbox.y2 / img_height,
+        )
+
+    def to_absolute(self, img_dimensions: tuple[int, int], margin: int = 0):
+        img_width, img_height = img_dimensions
+
+        x1 = max(round(self.x1 * img_width), 0)
+        y1 = max(round(self.y1 * img_height), 0)
+        x2 = min(round(self.x2 * img_width), img_width)
+        y2 = min(round(self.y2 * img_height), img_height)
+
+        rect = Rectangle(x1, y1, x2, y2)
+        return rect.expanded(margin, img_dimensions)
+
+    def __mul__(self, other: float):
+        return RatioRectangle(
+            self.x1 * other,
+            self.y1 * other,
+            self.x2 * other,
+            self.y2 * other,
         )
 
 
@@ -78,8 +148,8 @@ def task2(folderName: str):
         image = cv.imread(str(image_path))
 
         # replace all white/transparent pixels with black
-        transparent_pixels = np.all(image == [255, 255, 255], axis=-1)
-        image[transparent_pixels] = [0, 0, 0]
+        # transparent_pixels = np.all(image == [255, 255, 255], axis=-1)
+        # image[transparent_pixels] = [0, 0, 0]
 
         # Create scaled templates
         # templates = create_scaled_templates(image, 7)
@@ -252,18 +322,18 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
         #     continue
         # print(label)
         # if label != "02-bike":
-            # continue
+        # continue
 
-        # the bounding box of the icon
-        # (between pyramid levels, will need to be x2 for next levl)
-        previous_layer_bbox = None
+        # the bounding box of the search space i.e. where the icon was on the previous level
+        # (between pyramid levels, will need to be x2 for next level)
+        layer_bbox: RatioRectangle | None = None
 
         # "confidence" in this icon being the one
         min_difference = np.inf
 
         # what scale factors to try at the next level
         # 0.1-1.0 at the lowest level, then will be narrowed down
-        scale_factors_to_try: list[float] = np.linspace(0.1, 1.0, 9).tolist()
+        scale_factors_to_try: list[float] = np.linspace(0.1, 1.0, 10).tolist()
 
         # for every pyramid level
         for level_number in reversed(range(len(pyramid))):
@@ -282,19 +352,26 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 scaled_template = template_level.scaled(scale_factor)
                 scaled_image = image_level.image
 
-                if previous_layer_bbox is not None:
+                if layer_bbox is not None:
                     # crop image to bounding box
-                    MARGIN = 10
-                    y1 = previous_layer_bbox.y1 * 2 - MARGIN
-                    y2 = previous_layer_bbox.y2 * 2 + MARGIN
-                    x1 = previous_layer_bbox.x1 * 2 - MARGIN
-                    x2 = previous_layer_bbox.x2 * 2 + MARGIN
-                    if 0 < x1 < x2 < scaled_image.shape[1] and 0 < y1 < y2 < scaled_image.shape[0]:
-                        scaled_image = scaled_image[y1:y2, x1:x2]
+                    bbox = layer_bbox.to_absolute((scaled_image.shape[1], scaled_image.shape[0]), 5)
+                    assert bbox.x2 - bbox.x1 == bbox.y2 - bbox.y1  # absolute bbox should be perfecly square
 
-                corr_matrix = match_template(scaled_image, scaled_template)
+                    x1, x2 = bbox.x1, bbox.x2
+                    y1, y2 = bbox.y1, bbox.y2
 
-                min_difference = corr_matrix.min()
+                    assert 0 <= x1 < x2 <= scaled_image.shape[1]
+                    assert 0 <= y1 < y2 <= scaled_image.shape[0]
+                    image_search_region = scaled_image[y1:y2, x1:x2]
+
+                else:  # no cropping necessary, look through whole image
+                    image_search_region = scaled_image
+                    bbox = None
+
+                corr_matrix = match_template(image_search_region, scaled_template)
+
+                x_min, y_min = np.unravel_index(corr_matrix.argmin(), corr_matrix.shape)
+                min_difference = corr_matrix[x_min, y_min]
                 if min_difference > 0.3:
                     # tmp: if we skipped a match
                     if label in correct_matches:
@@ -304,39 +381,42 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 if min_difference > best_scale_factor_score:
                     continue  # we already found a better scale factor
 
-                # we found the best match so far of all the scale factors.
-                # calculate the bounding box coords in the whole image
-                # (the image might be cropped from the previous layer's bbox)
-
-                x1, y1 = np.unravel_index(corr_matrix.argmin(), corr_matrix.shape)
-                x1, y1 = int(x1), int(y1)  # because np.unravel_index() returns intp (not int)
-                template_shape = scaled_template.shape
-
-                bbox = Rectangle(x1, y1, x1 + template_shape[0], y1 + template_shape[1])
-
-                if previous_layer_bbox is not None:
-                    bbox.x1 += previous_layer_bbox.x1
-                    bbox.x2 += previous_layer_bbox.x1
-                    bbox.y1 += previous_layer_bbox.y1
-                    bbox.y2 += previous_layer_bbox.y1
-
+                # we found the best match of all the scale factors so far.
                 best_scale_factor = scale_factor
                 best_scale_factor_score = min_difference
-                best_scale_factor_bbox = bbox
+
+                # calculate the bounding box coords so that the next layer only
+                # has to look here
+                x1, y1 = int(x_min), int(y_min)  # because np.unravel_index() returns intp (not int)
+
+                # the image might be cropped from the previous layer's bbox
+                if bbox is not None:
+                    x1 += bbox.x1
+                    y1 += bbox.y1
+
+                template_shape = scaled_template.shape
+                best_scale_factor_bbox = Rectangle(x1, y1, x1 + template_shape[0], y1 + template_shape[1])
 
                 # render image with bounding box
-                # render(scaled_image, best_bbox)
+                # render(scaled_image, best_scale_factor_bbox)
+
+            if best_scale_factor_score == np.inf:
+                # all scales were skipped due to not being similar enough
+                continue
 
             scale_factors_to_try = [
                 best_scale_factor * 0.7,
                 best_scale_factor * 0.85,
                 best_scale_factor,
             ]
-            previous_layer_bbox = best_scale_factor_bbox
 
-        # else:  # didn't break
-        # if found_match:
-        match = Match(Path(label).stem, min_difference, previous_layer_bbox)
+            assert best_scale_factor_bbox is not None
+            img_dimensions = (image_level.image.shape[1], image_level.image.shape[0])
+            layer_bbox = RatioRectangle.from_bbox(best_scale_factor_bbox, img_dimensions)
+
+        assert layer_bbox is not None
+        bbox = layer_bbox.to_absolute((image.shape[1], image.shape[0]), 0)
+        match = Match(Path(label).stem, min_difference, bbox)
         matches.append(match)
 
         # print(repr(match))
@@ -362,7 +442,7 @@ def filter_matches(matches: List[Match], threshold: float) -> List[Match]:
     return [match for match in matches if match.difference < threshold]
 
 
-def match_template(image, template):
+def match_template(image: Image, template):
     # get the dimensions of the image and the template
     image_height, image_width, _ = image.shape
     template_height, template_width, _ = template.shape
@@ -474,18 +554,15 @@ def calculate_patch_similarity(
             cv.imshow(name, image)
             cv.waitKey(0)
 
-        # imshow(patch1, "patch1")
-        # imshow(patch2, "patch2")
-        # imshow(diff, "diff")
-        # cv.waitKey(0)
+        d = diff.mean() / (255**2)
 
-        d = diff.mean() / (255 ** 2)
         # print(d)
-        # if d < 0.25:
+        # if d < 0.15:
         #     imshow(patch1, "patch1")
         #     imshow(patch2, "patch2")
-        #     imshow(diff, "diff")
+        #     imshow(diff / 25565, "diff")
         #     cv.waitKey(0)
+
         return d
 
     if ssd_match == cross_corr_match:
