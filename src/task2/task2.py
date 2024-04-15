@@ -17,7 +17,7 @@ from gaussian_pyramid import GaussianPyramid
 Image = np.ndarray
 
 
-DEBUG_LEVEL = 1
+DEBUG_LEVEL = 0
 
 
 def print(s=""):
@@ -189,7 +189,9 @@ def task2(folderName: str):
         print(f"Icons in image: {list(icons_in_image.values())}")
 
         labels_in_image = [icon.label for icon in icons_in_image.values()]
-        correct_matches = [match.label for match in matches if match.label in labels_in_image]
+        correct_matches = [
+            match.label for match in matches if match.label in labels_in_image
+        ]
         accuracy = len(correct_matches) / len(labels_in_image)
         print(f"Accuracy: {accuracy * 100}%")
 
@@ -245,7 +247,9 @@ def find_matching_icons_3a(image, icons) -> List[Match]:
                     pad_height = resized_template.shape[0] - bounding_box.shape[0]
                     pad_width = resized_template.shape[1] - bounding_box.shape[1]
                     padded_bounding_box = np.pad(
-                        bounding_box, ((0, pad_height), (0, pad_width), (0, 0)), mode="constant"
+                        bounding_box,
+                        ((0, pad_height), (0, pad_width), (0, 0)),
+                        mode="constant",
                     )
 
                     bounding_box = padded_bounding_box
@@ -258,7 +262,16 @@ def find_matching_icons_3a(image, icons) -> List[Match]:
                         best_template = label
                         bbox = Rectangle(x, y, x + w, y + h)
 
-        cv.putText(image, best_template, (x, y), cv.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 2, cv.LINE_AA)
+        cv.putText(
+            image,
+            best_template,
+            (x, y),
+            cv.FONT_HERSHEY_PLAIN,
+            1,
+            (0, 0, 255),
+            2,
+            cv.LINE_AA,
+        )
         # print(best_template)
         matches.append(Match(Path(best_template).stem, min_difference, bbox_match))
     # cv.imshow("image", image)
@@ -284,7 +297,9 @@ def find_matching_icons_1(image, icons) -> List[Match]:
                     best_template = label
                     x1 = corr_matrix.argmin(axis=0)[0]
                     x2 = corr_matrix.argmin(axis=1)[0]
-                    bbox_match = Rectangle(x1, x2, x1 + template.shape[0], x2 + template.shape[1])
+                    bbox_match = Rectangle(
+                        x1, x2, x1 + template.shape[0], x2 + template.shape[1]
+                    )
         matches.append(Match(Path(label).stem, min_difference, bbox_match))
 
     matches = sorted(matches, key=lambda x: x.min_difference)
@@ -305,7 +320,9 @@ def render(image: np.ndarray, bbox: Rectangle | None = None):
     cv.waitKey(0)
 
 
-def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> list[Match]:
+def find_matching_icons_2(
+    image, icons: list[tuple[str, GaussianPyramid]]
+) -> list[Match]:
     # render(image)
     image_pyramid = GaussianPyramid(image)
     matches: list[Match] = []
@@ -320,9 +337,9 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
             "35-police",
             "50-cemetery",
         ]
-        # will_match = label.split(".")[0] in correct_matches
-        # if not will_match:
-        #     continue
+        will_match = label.split(".")[0] in correct_matches
+        if not will_match:
+            continue
         # print(label)
         # if label != "02-bike":
         # continue
@@ -339,7 +356,9 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
         scale_factors_to_try: list[float] = np.linspace(0.1, 0.9, 9).tolist()
 
         # for every pyramid level
-        for level_number in tqdm(reversed(range(len(pyramid))), total=len(pyramid), desc="pyramid lvl"):
+        for level_number in tqdm(
+            reversed(range(len(pyramid))), total=len(pyramid), desc="pyramid lvl"
+        ):
             image_level = image_pyramid[level_number]
             template_level = pyramid[level_number]
 
@@ -355,10 +374,16 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 scaled_template = template_level.scaled(scale_factor)
                 scaled_image = image_level.image
 
-                if layer_bbox is not None: # crop image to previous layers' bounding box
-                    
-                    bbox = layer_bbox.to_absolute((scaled_image.shape[1], scaled_image.shape[0]), 5)
-                    assert bbox.x2 - bbox.x1 == bbox.y2 - bbox.y1  # absolute bbox should be perfecly square
+                if (
+                    layer_bbox is not None
+                ):  # crop image to previous layers' bounding box
+
+                    bbox = layer_bbox.to_absolute(
+                        (scaled_image.shape[1], scaled_image.shape[0]), 5
+                    )
+                    assert (
+                        bbox.x2 - bbox.x1 == bbox.y2 - bbox.y1
+                    )  # absolute bbox should be perfecly square
 
                     x1, x2 = bbox.x1, bbox.x2
                     y1, y2 = bbox.y1, bbox.y2
@@ -378,7 +403,9 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 if min_difference > 0.3:
                     # tmp: if we skipped a match
                     if label in correct_matches:
-                        print(f"skipping {label} at level {level_number} ({min_difference=})")
+                        print(
+                            f"skipping {label} at level {level_number} ({min_difference=})"
+                        )
                     continue  # no match
 
                 if min_difference > best_scale_factor_score:
@@ -390,7 +417,9 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
 
                 # calculate the bounding box coords so that the next layer only
                 # has to look here
-                x1, y1 = int(x_min), int(y_min)  # because np.unravel_index() returns intp (not int)
+                x1, y1 = int(x_min), int(
+                    y_min
+                )  # because np.unravel_index() returns intp (not int)
 
                 # the image might be cropped from the previous layer's bbox
                 if bbox is not None:
@@ -398,7 +427,9 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                     y1 += bbox.y1
 
                 template_shape = scaled_template.shape
-                best_scale_factor_bbox = Rectangle(x1, y1, x1 + template_shape[0], y1 + template_shape[1])
+                best_scale_factor_bbox = Rectangle(
+                    x1, y1, x1 + template_shape[0], y1 + template_shape[1]
+                )
 
                 if DEBUG_LEVEL >= 1:
                     # render image with bounding box
@@ -416,7 +447,9 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
 
             assert best_scale_factor_bbox is not None
             img_dimensions = (image_level.image.shape[1], image_level.image.shape[0])
-            layer_bbox = RatioRectangle.from_bbox(best_scale_factor_bbox, img_dimensions)
+            layer_bbox = RatioRectangle.from_bbox(
+                best_scale_factor_bbox, img_dimensions
+            )
 
         assert layer_bbox is not None
         bbox = layer_bbox.to_absolute((image.shape[1], image.shape[0]), 0)
@@ -455,7 +488,9 @@ def match_template(image: Image, template: Image):
         raise ValueError("Template dimensions exceed image dimensions")
 
     # create a result matrix to store the correlation values
-    result = np.ones((image_height - template_height + 1, image_width - template_width + 1))
+    result = np.ones(
+        (image_height - template_height + 1, image_width - template_width + 1)
+    )
 
     # iterate through the image and calculate the correlation
     for y in tqdm(range(image_height - template_height + 1), desc="match_template y"):
@@ -472,8 +507,8 @@ def match_template(image: Image, template: Image):
             result[x, y] = calculate_patch_similarity(
                 patch1,
                 template,
-                True,
                 False,
+                True,
             )
 
     # render(result)
@@ -538,7 +573,9 @@ def rotate_image(image, rotation):
 
 
 def downsample(image, scale_factor=0.5):
-    downsampled_size = int(image.shape[0] * scale_factor), int(image.shape[1] * scale_factor)
+    downsampled_size = int(image.shape[0] * scale_factor), int(
+        image.shape[1] * scale_factor
+    )
     # gaussian blur image
     image = cv.GaussianBlur(image, (5, 5), 0)
     # scale down image
@@ -553,35 +590,53 @@ def calculate_patch_similarity(
     def ssd_normalized(patch1, patch2):
         diff = (patch1 - patch2).astype(np.int32) ** 2
 
-        def imshow(image, name: str):
-            pass
-            image = cv.resize(image, (512, 512), interpolation=cv.INTER_NEAREST)
-            cv.imshow(name, image)
-            cv.waitKey(0)
+        return diff
 
-        d = diff.mean() / (255**2)
-        assert 0 <= d <= 1
+    def cross_corr_normalized(patch1, patch2):
+        patch1 = patch1.astype(np.float64)
+        patch2 = patch2.astype(np.float64)
+        patch1 *= 255 / patch1.max()
+        patch2 *= 255 / patch2.max()
 
-        if DEBUG_LEVEL >= 2:
-            if d < 0.15:
-                print(d)
-                imshow(patch1, "patch1")
-                imshow(patch2, "patch2")
-                imshow(diff / 25565, "diff")
-                cv.waitKey(0)
+        diff = np.sum(
+            ((patch1 - patch1.mean()) / patch1.std())
+            * ((patch2 - patch2.mean()) / patch2.std())
+        ) / patch1.size
 
-        return d
+        # distributing -1<x<1 to 0<x<1
+        diff = (diff + 1) * 0.5
+
+        # flipping 0<x<1 to 1<x<0 because 0 is no difference
+        diff = 1 - diff
+
+        return diff
 
     if ssd_match == cross_corr_match:
         raise ValueError("Choose correlation matching or ssd matching!")
 
     match_score: float
     if ssd_match:
-        match_score = ssd_normalized(patch1=patch1, patch2=patch2)
+        match_score = ssd_normalized(patch1, patch2)
     elif cross_corr_match:
-        raise NotImplementedError
+        match_score = cross_corr_normalized(patch1, patch2)
     else:
         raise ValueError("Choose correlation matching or ssd matching!")
+
+    def imshow(image, name: str):
+        pass
+        image = cv.resize(image, (512, 512), interpolation=cv.INTER_NEAREST)
+        cv.imshow(name, image)
+        cv.waitKey(0)
+
+    assert 0 <= match_score <= 1
+
+    if DEBUG_LEVEL >= 2:
+        if match_score < 0.7:
+            print(str(match_score))
+            imshow(patch1, "patch1")
+            imshow(patch2, "patch2")
+            # imshow(match_score / 25565, "match_score")
+            cv.waitKey(0)
 
     return match_score
 
