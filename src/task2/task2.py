@@ -17,6 +17,9 @@ from gaussian_pyramid import GaussianPyramid
 Image = np.ndarray
 
 
+DEBUG_LEVEL = 1
+
+
 def print(s=""):
     tqdm.write(str(s))
 
@@ -164,7 +167,7 @@ def task2(folderName: str):
 
     # found_matches = []
     # Load test images and find matching icons
-    for file in tqdm(natsorted(os.listdir(images_path))):
+    for file in tqdm(natsorted(os.listdir(images_path)), desc="test image"):
         # Load test image
         image = cv.imread(str(images_path / file))
 
@@ -308,7 +311,7 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
     matches: list[Match] = []
 
     # for every icon
-    for label, pyramid in tqdm(icons):
+    for label, pyramid in tqdm(icons, desc="icon"):
         # render(pyramid.image)
         correct_matches = [
             "37-post-office",
@@ -333,10 +336,10 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
 
         # what scale factors to try at the next level
         # 0.1-1.0 at the lowest level, then will be narrowed down
-        scale_factors_to_try: list[float] = np.linspace(0.1, 1.0, 10).tolist()
+        scale_factors_to_try: list[float] = np.linspace(0.1, 0.9, 9).tolist()
 
         # for every pyramid level
-        for level_number in reversed(range(len(pyramid))):
+        for level_number in tqdm(reversed(range(len(pyramid))), total=len(pyramid), desc="pyramid lvl"):
             image_level = image_pyramid[level_number]
             template_level = pyramid[level_number]
 
@@ -345,15 +348,15 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
             best_scale_factor_bbox = None
 
             # for every scale factor in the pyramid level
-            for scale_factor in scale_factors_to_try:
+            for scale_factor in tqdm(scale_factors_to_try, desc="scale factor"):
                 if scale_factor < 0.05:
                     continue
 
                 scaled_template = template_level.scaled(scale_factor)
                 scaled_image = image_level.image
 
-                if layer_bbox is not None:
-                    # crop image to bounding box
+                if layer_bbox is not None: # crop image to previous layers' bounding box
+                    
                     bbox = layer_bbox.to_absolute((scaled_image.shape[1], scaled_image.shape[0]), 5)
                     assert bbox.x2 - bbox.x1 == bbox.y2 - bbox.y1  # absolute bbox should be perfecly square
 
@@ -397,8 +400,9 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 template_shape = scaled_template.shape
                 best_scale_factor_bbox = Rectangle(x1, y1, x1 + template_shape[0], y1 + template_shape[1])
 
-                # render image with bounding box
-                # render(scaled_image, best_scale_factor_bbox)
+                if DEBUG_LEVEL >= 1:
+                    # render image with bounding box
+                    render(scaled_image, best_scale_factor_bbox)
 
             if best_scale_factor_score == np.inf:
                 # all scales were skipped due to not being similar enough
@@ -442,7 +446,7 @@ def filter_matches(matches: List[Match], threshold: float) -> List[Match]:
     return [match for match in matches if match.difference < threshold]
 
 
-def match_template(image: Image, template):
+def match_template(image: Image, template: Image):
     # get the dimensions of the image and the template
     image_height, image_width, _ = image.shape
     template_height, template_width, _ = template.shape
@@ -454,15 +458,16 @@ def match_template(image: Image, template):
     result = np.ones((image_height - template_height + 1, image_width - template_width + 1))
 
     # iterate through the image and calculate the correlation
-    for y in range(image_height - template_height + 1):
+    for y in tqdm(range(image_height - template_height + 1), desc="match_template y"):
         for x in range(image_width - template_width + 1):
 
             patch1 = image[y : y + template_height, x : x + template_width]
             if (patch1 == 255).all():
                 continue
 
-            # bbox = Rectangle(x, y, x + template_width, y + template_height)
-            # render(image, bbox)
+            if DEBUG_LEVEL >= 2:
+                bbox = Rectangle(x, y, x + template_width, y + template_height)
+                render(image, bbox)
 
             result[x, y] = calculate_patch_similarity(
                 patch1,
@@ -555,13 +560,15 @@ def calculate_patch_similarity(
             cv.waitKey(0)
 
         d = diff.mean() / (255**2)
+        assert 0 <= d <= 1
 
-        # print(d)
-        # if d < 0.15:
-        #     imshow(patch1, "patch1")
-        #     imshow(patch2, "patch2")
-        #     imshow(diff / 25565, "diff")
-        #     cv.waitKey(0)
+        if DEBUG_LEVEL >= 2:
+            if d < 0.15:
+                print(d)
+                imshow(patch1, "patch1")
+                imshow(patch2, "patch2")
+                imshow(diff / 25565, "diff")
+                cv.waitKey(0)
 
         return d
 
@@ -572,8 +579,7 @@ def calculate_patch_similarity(
     if ssd_match:
         match_score = ssd_normalized(patch1=patch1, patch2=patch2)
     elif cross_corr_match:
-        # TODO: add option for this
-        pass
+        raise NotImplementedError
     else:
         raise ValueError("Choose correlation matching or ssd matching!")
 
