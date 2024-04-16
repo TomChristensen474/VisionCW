@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from skimage.feature import hog
 from tqdm import tqdm
 
 import cv2 as cv
@@ -48,8 +47,10 @@ class SIFT:
     octave_scale_factor: int = 2
 
     def __init__(self, image: Image):
+        self.copy_image = image
+
         self.image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
-        self.image = cv.resize(self.image, (128, 128))
+        self.image = cv.resize(self.image, (256, 256))
         self.neighbourhood_size = 2**self.num_octaves
 
         self.scale_space_construct()
@@ -61,14 +62,18 @@ class SIFT:
     def draw_keypoints(self):
         print(len(self.features))
         for feature in self.features:
+            x_scale_factor = self.image.shape[0] / feature.keypoint.scale.shape[0]
+            y_scale_factor = self.image.shape[1] / feature.keypoint.scale.shape[1]
             cv.circle(
                 self.image,
-                (feature.keypoint.centre.y, feature.keypoint.centre.x),
-                3,
+                (int(feature.keypoint.centre.y*y_scale_factor), int(feature.keypoint.centre.x * x_scale_factor)),
+                2,
                 (0, 255, 0),
-                5,
+                2,
             )
+        self.image = cv.resize(self.image, (512, 512))
         cv.imshow("keypoints", self.image)
+        cv.imshow("original", self.copy_image)
         cv.waitKey(0)
 
     def scale_space_construct(self) -> None:
@@ -135,7 +140,7 @@ class SIFT:
         self.features = features
 
     def is_extreme(self, scales: list[Image], i: int, j: int) -> bool:
-        threshold = 0.0  # TODO find a good threshold
+        threshold = 0.00000  # TODO find a good threshold
         maximum = np.max(
             [
                 scales[0][i - 1 : i + 2, j - 1 : j + 2],
@@ -152,8 +157,8 @@ class SIFT:
         )
 
         if (
-            scales[1][i, j] >= maximum + threshold
-            or scales[1][i, j] <= minimum - threshold
+            scales[1][i, j] > maximum + threshold
+            or scales[1][i, j] < minimum - threshold
         ):
             return True
 

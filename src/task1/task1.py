@@ -551,7 +551,7 @@ def get_angle_from_segments(seg1: Segment, seg2: Segment) -> float:
 
     angle = np.abs(theta1 - theta2)
 
-    # turn into an acute anvle
+    # turn into an acute angle
     angle = angle if angle < 90 else 180 - angle
 
     is_obtuse = get_angle_from_vectors(seg1, seg2) > 90
