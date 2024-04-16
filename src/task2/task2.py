@@ -338,8 +338,8 @@ def find_matching_icons_2(
             "50-cemetery",
         ]
         will_match = label.split(".")[0] in correct_matches
-        # if not will_match:
-        #     continue
+        if not will_match:
+            continue
         # print(label)
         # if label != "02-bike":
         # continue
@@ -493,7 +493,8 @@ def match_template(image: Image, template: Image):
     )
 
     # iterate through the image and calculate the correlation
-    for y in tqdm(range(image_height - template_height + 1), desc="match_template y"):
+    # for y in tqdm(range(image_height - template_height + 1), desc="match_template y"):
+    for y in range(image_height - template_height + 1):
         for x in range(image_width - template_width + 1):
 
             patch1 = image[y : y + template_height, x : x + template_width]
