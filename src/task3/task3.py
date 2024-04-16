@@ -24,40 +24,78 @@ def four_point_algorithm(p, q):
     return H
 
 def task3_run(folderName:str):
-    path_dir = os.getcwd() + "/datasets/IconDataset/png/01-lighthouse.png"
-    img = cv.imread(str(path_dir))
-    run(img=img)
+    path_dir_template = os.getcwd() + "/datasets/IconDataset/png/01-lighthouse.png"
+    path_dir_image = os.getcwd() + "/datasets/Task3Dataset/images/test_image_2.png"
 
-def run(img):
-    img_gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    template = cv.imread(str(path_dir_template))
+    image = cv.imread(str(path_dir_image))
 
+    run(image, template)
+
+"""
+Takes in SIFT points after RANSAC and chooses 4 points (template)
+"""
+def get_template_points(input_points: list[Point]):
+    output_points = []
+    return output_points
+
+"""
+Matches template points to image points using descirptors 
+"""
+def match_points_using_descriptors():
+    pass
+
+"""
+Takes in SIFT points after RANSAC and chooses 4 points (image)
+"""
+def get_image_points(input_points: list[Point]):
+    output_points = []
+    return output_points
+
+
+def descriptor_ssd(descriptor1, descriptor2):
+    pass
+
+def run(image, template):
+    template_gray = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
+    image_gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    
     # 1. SIFT
     sift = cv.SIFT_create() # ignore "known member" remember
-    keypoints, descriptors = sift.detectAndCompute(img_gray, None)
+    template_keypoints, template_descriptors = sift.detectAndCompute(template_gray, None)
+    image_keypoints, image_descriptors = sift.detectAndCompute(image_gray, None)
+
 
     # converts the SIFT detectAndCompute keypoints to Point (dataclass) form for ransac
-    points = []
-    for keypoint in keypoints:
-        points.append(Point(int(keypoint.pt[0]), int(keypoint.pt[1])))
+    templatePointDescriptorMap = {}
+    template_points = []
+    for keypoint, descriptor in zip(template_keypoints, template_descriptors):
+        point = Point(int(keypoint.pt[0]), int(keypoint.pt[1]))
+        template_points.append(point)
+        templatePointDescriptorMap[point] = descriptor
 
-    # img_keypoints_original = np.copy(img)  
-    # img_keypoints_original = cv.drawKeypoints(img, keypoints, img_keypoints_original, color=(0, 255, 0), flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-    # cv.imshow(" ", img_keypoints_original)
-    # cv.waitKey(0)  
-    # cv.destroyAllWindows()
     
     # 2. RANSAC
     ransac = Ransac(distance_threshold=10, sample_points_num=30)  
     try:
-        best_points, best_line = ransac.run_ransac(points=points, iterations=100) 
-        print(f"Keypoints removed: {len(keypoints) - len(best_points)} / {len(keypoints)}")
+        # get filtered points and the ransac line
+        filtered_points, best_line = ransac.run_ransac(points=points, iterations=100) 
 
-        if len(keypoints) - len(best_points) < 4:
+        # get the corresponding descriptors for each filtered point
+        filtered_descriptors = np.array([pointDescriptorMap[point] for point in filtered_points])
+
+        print(f"Keypoints removed: {len(keypoints) - len(filtered_points)} / {len(keypoints)}")
+
+        if len(keypoints) - len(filtered_points) < 4:
             raise ValueError("need at least 4 keypoints for homography")
 
     except ValueError as e:
         print(e)
 
+    template_points = get_template_points(input_points=filtered_points)
+    image_points = get_image_points()
+
+    #H = four_point_algorithm(template_points, image_points)
 
 
 

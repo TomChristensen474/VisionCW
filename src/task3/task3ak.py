@@ -21,7 +21,7 @@ def run(img):
     sift = cv.SIFT_create() # ignore "known member" remember
 
     keypoints, descriptors = sift.detectAndCompute(img_gray, None)
-
+    #datasets/Task3Dataset/images/test_image_1.png
     # converts the SIFT detectAndCompute keypoints to Point (dataclass) form for ransac
     points = []
     for keypoint in keypoints:
