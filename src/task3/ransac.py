@@ -14,7 +14,7 @@ class Point:
 
 class Ransac:
 
-    def __init__(self, distance_threshold: float = 0.5, sample_points_num: int = 100):
+    def __init__(self, distance_threshold: float = 100, sample_points_num: int = 1):
         self.distance_threshold = distance_threshold
         self.sample_points_num = sample_points_num
 
@@ -52,6 +52,8 @@ class Ransac:
                 unselected_points.append(point)
 
         return sampled_points, unselected_points
+    
+    
 
     # fit points to linear line using least squares
     def fit_line(self, selected_points: List[Point]) -> Tuple[float,float]:
@@ -82,6 +84,10 @@ class Ransac:
 
         if not best_points or not best_line:  # if empty arry or best line is none
             raise ValueError("no points were found")
+        
+        # re fit and get parameters based on best line
+        final_m, final_c = self.fit_line(selected_points=best_points)
+        best_line = LineEquation(m=final_m, c=final_c)
 
         return best_points, best_line
 
