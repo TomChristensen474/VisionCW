@@ -338,8 +338,8 @@ def find_matching_icons_2(
             "50-cemetery",
         ]
         will_match = label.split(".")[0] in correct_matches
-        if not will_match:
-            continue
+        # if not will_match:
+        #     continue
         # print(label)
         # if label != "02-bike":
         # continue
