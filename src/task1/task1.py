@@ -26,7 +26,7 @@ def task1(folderName: str) -> float:
     total_error = 0
 
     for filename, actual_angle in image_files.values:
-        image: Path = Path(folderName) / filename
+        image: Path = dataset_folder / filename
         # if image.stem != "image5":
         # continue
 
