@@ -1,9 +1,15 @@
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import cv2 as cv
 import numpy as np
 from ransac import Point, Ransac
 
+@dataclass
+class TemplateImageKeypointMatch:
+    match_ssd: float
+    template_point_index: int 
+    image_point_index: int
 
 # for point algorithm from lectures
 def four_point_algorithm(p, q):
@@ -53,8 +59,42 @@ def get_image_points(input_points: list[Point]):
     return output_points
 
 
-def descriptor_ssd(descriptor1, descriptor2):
-    pass
+def compare_descriptors_ssd(descriptor1, descriptor2):
+    ssd_total = 0
+    for i in range(len(descriptor1)):
+        ssd = (descriptor1[i] - descriptor2[i]) ** 2
+        ssd_total += ssd
+    return ssd_total
+
+"""
+this will match descriptors in template with descriptors in image and return 
+best matching points which are sorted based on lowest difference metric (e.g. lowest SSD)
+"""
+def descriptor_point_match(template_descriptors, image_descriptors):
+    best_matches = []
+    # for each template keypoint
+    for i, template_descriptor in enumerate(template_descriptors):
+        min_ssd = float("inf")
+        best_image_point_index = None
+        # find the best matching keypoint in the image
+        for j, image_descriptor in enumerate(image_descriptors):
+            ssd = compare_descriptors_ssd(template_descriptor,image_descriptor)
+            if ssd < min_ssd:
+                min_ssd = ssd
+                best_image_point_index = j
+
+        # add the best matching (template_point,image_point) pair with the ssd      
+        if best_image_point_index:  
+            best_matches.append(TemplateImageKeypointMatch(match_ssd=min_ssd, 
+                                                       template_point_index=i, 
+                                                       image_point_index=best_image_point_index))
+        else:
+            raise ValueError("error")
+
+
+    # sort the best matches based on the lowest ssd
+    best_matches.sort(key=lambda x: x.match_ssd)
+    return best_matches
 
 def run(image, template):
     template_gray = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
@@ -66,35 +106,38 @@ def run(image, template):
     image_keypoints, image_descriptors = sift.detectAndCompute(image_gray, None)
 
 
-    # converts the SIFT detectAndCompute keypoints to Point (dataclass) form for ransac
-    templatePointDescriptorMap = {}
     template_points = []
-    for keypoint, descriptor in zip(template_keypoints, template_descriptors):
-        point = Point(int(keypoint.pt[0]), int(keypoint.pt[1]))
-        template_points.append(point)
-        templatePointDescriptorMap[point] = descriptor
+    for keypoint in template_keypoints:
+        template_points.append(Point(int(keypoint.pt[0]), int(keypoint.pt[1])))
 
+    image_points = []
+    for keypoint in image_keypoints:
+        image_points.append(Point(int(keypoint.pt[0]), int(keypoint.pt[1])))
+
+    # ransac to filter keypoints
+    ransac = Ransac(distance_threshold=10, sample_points_num=30)
+    filtered_template_points, _ = ransac.run_ransac(template_points, iterations=100)
+    filtered_image_points, _ = ransac.run_ransac(image_points, iterations=100)
+
+
+    # get filtered descriptors based on filtered RANSAC points
+    filtered_template_descriptors = []
+    for point in filtered_template_points:
+        index = template_points.index(point)
+        filtered_template_descriptors.append(template_descriptors[index])
+
+    filtered_image_descriptors = []
+    for point in filtered_image_points:
+        index = image_points.index(point)
+        filtered_image_descriptors.append(image_descriptors[index])
     
-    # 2. RANSAC
-    ransac = Ransac(distance_threshold=10, sample_points_num=30)  
-    try:
-        # get filtered points and the ransac line
-        filtered_points, best_line = ransac.run_ransac(points=points, iterations=100) 
+    best_matches = descriptor_point_match(filtered_template_descriptors, filtered_image_descriptors)
 
-        # get the corresponding descriptors for each filtered point
-        filtered_descriptors = np.array([pointDescriptorMap[point] for point in filtered_points])
+    # get the best 4 matches
+    # TODO: may need checks to see if the 4 are good enough
+    best_4_matches = best_matches[:4]
 
-        print(f"Keypoints removed: {len(keypoints) - len(filtered_points)} / {len(keypoints)}")
-
-        if len(keypoints) - len(filtered_points) < 4:
-            raise ValueError("need at least 4 keypoints for homography")
-
-    except ValueError as e:
-        print(e)
-
-    template_points = get_template_points(input_points=filtered_points)
-    image_points = get_image_points()
-
+    print(best_4_matches)
     #H = four_point_algorithm(template_points, image_points)
 
 
