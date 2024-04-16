@@ -38,26 +38,6 @@ def task3_run(folderName:str):
 
     run(image, template)
 
-"""
-Takes in SIFT points after RANSAC and chooses 4 points (template)
-"""
-def get_template_points(input_points: list[Point]):
-    output_points = []
-    return output_points
-
-"""
-Matches template points to image points using descirptors 
-"""
-def match_points_using_descriptors():
-    pass
-
-"""
-Takes in SIFT points after RANSAC and chooses 4 points (image)
-"""
-def get_image_points(input_points: list[Point]):
-    output_points = []
-    return output_points
-
 
 def compare_descriptors_ssd(descriptor1, descriptor2):
     ssd_total = 0
@@ -133,13 +113,30 @@ def run(image, template):
     
     best_matches = descriptor_point_match(filtered_template_descriptors, filtered_image_descriptors)
 
-    # get the best 4 matches
+    if len(best_matches) < 4:
+        raise ValueError("not enough keypoints")
+
     # TODO: may need checks to see if the 4 are good enough
     best_4_matches = best_matches[:4]
 
+    draw_matches(template, image, template_keypoints, image_keypoints, best_4_matches)
+    
     print(best_4_matches)
     #H = four_point_algorithm(template_points, image_points)
 
+
+def draw_matches(template, image, template_keypoints, image_keypoints, matches):
+    for match in matches:
+        template_point = template_keypoints[match.template_point_index]
+        cv.drawMarker(template, (int(template_point.pt[0]), int(template_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+
+        image_point = image_keypoints[match.image_point_index]
+        cv.drawMarker(image, (int(image_point.pt[0]), int(image_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+
+    #cv.imshow(" ", template)
+    cv.imshow(" ", image)
+    cv.waitKey(0)
+    cv.destroyAllWindows()
 
 
 def task3(folderName: str):
