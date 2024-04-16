@@ -26,7 +26,7 @@ class PyramidLevel:
 
 
 class GaussianPyramid:
-    def __init__(self, image: Image, n: int = 3):
+    def __init__(self, image: Image, n: int = 4):
         self.image = image
 
         first_level = PyramidLevel(image)

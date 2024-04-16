@@ -46,7 +46,9 @@ class Rectangle:
     x2: int
     y2: int
 
-    def expanded(self, margin: int, img_dimensions: tuple[int, int]) -> "Rectangle":
+    def expanded(self, margin_percent: float, img_dimensions: tuple[int, int]) -> "Rectangle":
+        margin = int(img_dimensions[0] * margin_percent)
+
         max_x, max_y = img_dimensions
         max_x2, max_y2 = max_x - margin, max_y - margin
 
@@ -67,12 +69,17 @@ class Rectangle:
             pos_y = max_y - self.y2
             neg_y += margin - (max_y - self.y2)
 
-        return Rectangle(
+        expanded = Rectangle(
             int(self.x1 - neg_x),
             int(self.y1 - neg_y),
             int(self.x2 + pos_x),
             int(self.y2 + pos_y),
         )
+
+        # assert 0 <= x1 < x2 <= scaled_image.shape[1]
+        assert 0 <= expanded.x1 < expanded.x2 <= max_x
+        assert 0 <= expanded.y1 < expanded.y2 <= max_y
+        return expanded
 
     def __mul__(self, other: float):
         return Rectangle(
@@ -102,7 +109,7 @@ class RatioRectangle:
             bbox.y2 / img_height,
         )
 
-    def to_absolute(self, img_dimensions: tuple[int, int], margin: int = 0):
+    def to_absolute(self, img_dimensions: tuple[int, int], margin_percent: float = 0):
         img_width, img_height = img_dimensions
 
         x1 = max(round(self.x1 * img_width), 0)
@@ -111,7 +118,7 @@ class RatioRectangle:
         y2 = min(round(self.y2 * img_height), img_height)
 
         rect = Rectangle(x1, y1, x2, y2)
-        return rect.expanded(margin, img_dimensions)
+        return rect.expanded(margin_percent, img_dimensions)
 
     def __mul__(self, other: float):
         return RatioRectangle(
@@ -185,15 +192,18 @@ def task2(folderName: str):
         print(f"Test image: {file}")
         print(f"Found matches:")
         for match in matches:
-            print(f"\t{match}")
-        print(f"Icons in image: {list(icons_in_image.values())}")
+            correct_match = "YES:" if match.label in icons_in_image else "NO: "
+            print(f"\t{correct_match} {match}")
+
+        correct_icons_string = "\n\t".join([str(icon) for icon in icons_in_image.values()])
+        print(f"Icons in image:\n\t{correct_icons_string}")
 
         labels_in_image = [icon.label for icon in icons_in_image.values()]
-        correct_matches = [
-            match.label for match in matches if match.label in labels_in_image
-        ]
+        correct_matches = [match.label for match in matches if match.label in labels_in_image]
         accuracy = len(correct_matches) / len(labels_in_image)
         print(f"Accuracy: {accuracy * 100}%")
+
+        # break  # tmp: stop after 1st image
 
     # accuracies = []
     # for i, image in enumerate(test_images):
@@ -297,9 +307,7 @@ def find_matching_icons_1(image, icons) -> List[Match]:
                     best_template = label
                     x1 = corr_matrix.argmin(axis=0)[0]
                     x2 = corr_matrix.argmin(axis=1)[0]
-                    bbox_match = Rectangle(
-                        x1, x2, x1 + template.shape[0], x2 + template.shape[1]
-                    )
+                    bbox_match = Rectangle(x1, x2, x1 + template.shape[0], x2 + template.shape[1])
         matches.append(Match(Path(label).stem, min_difference, bbox_match))
 
     matches = sorted(matches, key=lambda x: x.min_difference)
@@ -311,21 +319,33 @@ def find_matching_icons_1(image, icons) -> List[Match]:
     return filter_matches(matches, 0.05)
 
 
-def render(image: np.ndarray, bbox: Rectangle | None = None):
+def render(image: np.ndarray, bbox: Rectangle | None = None, icon: np.ndarray | None = None):
     if bbox is not None:
         image = image.copy()
         cv.rectangle(image, (bbox.x1, bbox.y1), (bbox.x2, bbox.y2), (200, 0, 0), 2)
 
+    if icon is not None:
+        # rescale icon to same size as image
+        scaled_icon = cv.resize(icon, (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST)
+        # hstack the image and the icon
+        both_images = np.hstack((image, scaled_icon))
+        image = both_images
+
     cv.imshow("image", image)
-    cv.waitKey(0)
+    cv.waitKey(1)
 
 
-def find_matching_icons_2(
-    image, icons: list[tuple[str, GaussianPyramid]]
-) -> list[Match]:
+def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> list[Match]:
     # render(image)
     image_pyramid = GaussianPyramid(image)
     matches: list[Match] = []
+
+    scale_factor_multipliers_per_level = [
+        [1.0],
+        np.linspace(0.95, 1.05, 3).tolist(),
+        np.linspace(0.8, 1.2, 5).tolist(),
+        np.linspace(0.1, 0.9, 8).tolist(),
+    ]
 
     # for every icon
     for label, pyramid in tqdm(icons, desc="icon"):
@@ -343,6 +363,7 @@ def find_matching_icons_2(
         # print(label)
         # if label != "02-bike":
         # continue
+    for icon_label, icon_pyramid in icons:
 
         # the bounding box of the search space i.e. where the icon was on the previous level
         # (between pyramid levels, will need to be x2 for next level)
@@ -351,39 +372,36 @@ def find_matching_icons_2(
         # "confidence" in this icon being the one
         min_difference = np.inf
 
-        # what scale factors to try at the next level
-        # 0.1-1.0 at the lowest level, then will be narrowed down
-        scale_factors_to_try: list[float] = np.linspace(0.1, 0.9, 9).tolist()
+        # the scale factor of the previous pyramid layer
+        # starts at 1 because this value will be multiplied by numbers like 0.9
+        previous_layer_scale_factor = 1.0
+        previous_layer_scale_factor_level = -1  # to know if we made it to the last level
 
         # for every pyramid level
-        for level_number in tqdm(
-            reversed(range(len(pyramid))), total=len(pyramid), desc="pyramid lvl"
-        ):
-            image_level = image_pyramid[level_number]
-            template_level = pyramid[level_number]
+        for level_number in reversed(range(len(icon_pyramid))):
 
-            best_scale_factor = 0
+            image_level = image_pyramid[level_number]
+            template_level = icon_pyramid[level_number]
+            scale_factor_multipliers = scale_factor_multipliers_per_level[level_number]
+
+            best_scale_factor = 1.0
             best_scale_factor_score = np.inf
             best_scale_factor_bbox = None
 
             # for every scale factor in the pyramid level
-            for scale_factor in tqdm(scale_factors_to_try, desc="scale factor"):
+            for scale_factor_multiplier in scale_factor_multipliers:
+                scale_factor = scale_factor_multiplier * previous_layer_scale_factor
+
                 if scale_factor < 0.05:
                     continue
 
                 scaled_template = template_level.scaled(scale_factor)
                 scaled_image = image_level.image
 
-                if (
-                    layer_bbox is not None
-                ):  # crop image to previous layers' bounding box
+                if layer_bbox is not None:  # crop image to previous layers' bounding box
 
-                    bbox = layer_bbox.to_absolute(
-                        (scaled_image.shape[1], scaled_image.shape[0]), 5
-                    )
-                    assert (
-                        bbox.x2 - bbox.x1 == bbox.y2 - bbox.y1
-                    )  # absolute bbox should be perfecly square
+                    bbox = layer_bbox.to_absolute((scaled_image.shape[1], scaled_image.shape[0]), 0.05)
+                    assert bbox.x2 - bbox.x1 == bbox.y2 - bbox.y1  # absolute bbox should be perfecly square
 
                     x1, x2 = bbox.x1, bbox.x2
                     y1, y2 = bbox.y1, bbox.y2
@@ -396,16 +414,19 @@ def find_matching_icons_2(
                     image_search_region = scaled_image
                     bbox = None
 
+                # if template is bigger than image, skip
+                # (this might happen if scale_factor is >1 several layers in a row)
+                if (
+                    scaled_template.shape[0] > image_search_region.shape[0]
+                    or scaled_template.shape[1] > image_search_region.shape[1]
+                ):
+                    continue
+
                 corr_matrix = match_template(image_search_region, scaled_template)
 
                 x_min, y_min = np.unravel_index(corr_matrix.argmin(), corr_matrix.shape)
                 min_difference = corr_matrix[x_min, y_min]
-                if min_difference > 0.3:
-                    # tmp: if we skipped a match
-                    if label in correct_matches:
-                        print(
-                            f"skipping {label} at level {level_number} ({min_difference=})"
-                        )
+                if min_difference > 0.15:  # <- tunable hyperparameter
                     continue  # no match
 
                 if min_difference > best_scale_factor_score:
@@ -417,9 +438,7 @@ def find_matching_icons_2(
 
                 # calculate the bounding box coords so that the next layer only
                 # has to look here
-                x1, y1 = int(x_min), int(
-                    y_min
-                )  # because np.unravel_index() returns intp (not int)
+                x1, y1 = int(x_min), int(y_min)  # because np.unravel_index() returns intp (not int)
 
                 # the image might be cropped from the previous layer's bbox
                 if bbox is not None:
@@ -427,40 +446,40 @@ def find_matching_icons_2(
                     y1 += bbox.y1
 
                 template_shape = scaled_template.shape
-                best_scale_factor_bbox = Rectangle(
-                    x1, y1, x1 + template_shape[0], y1 + template_shape[1]
-                )
+                best_scale_factor_bbox = Rectangle(x1, y1, x1 + template_shape[0], y1 + template_shape[1])
 
                 if DEBUG_LEVEL >= 1:
                     # render image with bounding box
-                    render(scaled_image, best_scale_factor_bbox)
+                    render(scaled_image, best_scale_factor_bbox, icon=scaled_template)
 
             if best_scale_factor_score == np.inf:
                 # all scales were skipped due to not being similar enough
-                continue
+                break
 
-            scale_factors_to_try = [
-                best_scale_factor * 0.7,
-                best_scale_factor * 0.85,
-                best_scale_factor,
-            ]
+            previous_layer_scale_factor = best_scale_factor
+            previous_layer_scale_factor_level = level_number
 
             assert best_scale_factor_bbox is not None
             img_dimensions = (image_level.image.shape[1], image_level.image.shape[0])
-            layer_bbox = RatioRectangle.from_bbox(
-                best_scale_factor_bbox, img_dimensions
-            )
+            layer_bbox = RatioRectangle.from_bbox(best_scale_factor_bbox, img_dimensions)
 
-        assert layer_bbox is not None
+        if layer_bbox is None:
+            continue # this icon is not even close
+
+        if previous_layer_scale_factor_level != 0:
+            # we matched on lower levels, but we stopped matching before reaching the highest level
+            continue
+
         bbox = layer_bbox.to_absolute((image.shape[1], image.shape[0]), 0)
-        match = Match(Path(label).stem, min_difference, bbox)
+        match = Match(Path(icon_label).stem, min_difference, bbox)
         matches.append(match)
 
-        # print(repr(match))
-        # render(image, previous_layer_bbox)
+        print(repr(match))
+        render(image, bbox)
 
     matches.sort(key=lambda x: x.difference)
     return matches[:5]
+    # return matches
 
 
 def find_matching_icons(image, icons, version) -> list[Match]:
@@ -488,9 +507,7 @@ def match_template(image: Image, template: Image):
         raise ValueError("Template dimensions exceed image dimensions")
 
     # create a result matrix to store the correlation values
-    result = np.ones(
-        (image_height - template_height + 1, image_width - template_width + 1)
-    )
+    result = np.ones((image_height - template_height + 1, image_width - template_width + 1))
 
     # iterate through the image and calculate the correlation
     # for y in tqdm(range(image_height - template_height + 1), desc="match_template y"):
@@ -574,9 +591,7 @@ def rotate_image(image, rotation):
 
 
 def downsample(image, scale_factor=0.5):
-    downsampled_size = int(image.shape[0] * scale_factor), int(
-        image.shape[1] * scale_factor
-    )
+    downsampled_size = int(image.shape[0] * scale_factor), int(image.shape[1] * scale_factor)
     # gaussian blur image
     image = cv.GaussianBlur(image, (5, 5), 0)
     # scale down image
@@ -590,25 +605,32 @@ def calculate_patch_similarity(
 ) -> float:
     def ssd_normalized(patch1, patch2):
         diff = (patch1 - patch2).astype(np.int32) ** 2
-
         return diff
 
     def cross_corr_normalized(patch1, patch2):
-        patch1 = patch1.astype(np.float64)
-        patch2 = patch2.astype(np.float64)
+        # convert to float
+        patch1 = patch1.astype(np.float32)
+        patch2 = patch2.astype(np.float32)
+
+        # normalize
+
+        patch1 -= patch1.min()
         patch1 *= 255 / patch1.max()
+        patch2 -= patch2.min()
         patch2 *= 255 / patch2.max()
 
-        diff = np.sum(
-            ((patch1 - patch1.mean()) / patch1.std())
-            * ((patch2 - patch2.mean()) / patch2.std())
-        ) / patch1.size
+        diff = ((patch1 - patch1.mean()) / patch1.std()) * ((patch2 - patch2.mean()) / patch2.std())
 
-        # distributing -1<x<1 to 0<x<1
-        diff = (diff + 1) * 0.5
+        if DEBUG_LEVEL >= 2:
+            imshow(diff, "diff")
 
-        # flipping 0<x<1 to 1<x<0 because 0 is no difference
-        diff = 1 - diff
+        diff = np.sum(diff) / patch1.size
+
+        # [-1, 1] -> [0, 1]
+        diff = (diff + 1.0) / 2.0
+
+        # flipping 0<x<1 to 1<x<0 because 0 is "no difference"
+        diff = 1.0 - diff
 
         return diff
 
@@ -632,7 +654,7 @@ def calculate_patch_similarity(
     assert 0 <= match_score <= 1
 
     if DEBUG_LEVEL >= 2:
-        if match_score < 0.7:
+        if match_score < 0.3:
             print(str(match_score))
             imshow(patch1, "patch1")
             imshow(patch2, "patch2")

@@ -95,3 +95,4 @@ if __name__ == '__main__':
     rsc = Ransac()
     points = [Point(1,6), Point(3,7)]
     new_points = rsc.run_ransac(points=points)
+    
