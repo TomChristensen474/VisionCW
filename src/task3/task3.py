@@ -13,6 +13,13 @@ class TemplateImageKeypointMatch:
 
 # for point algorithm from lectures
 def four_point_algorithm(p, q):
+    """
+    Estimate a 2D transformation using the four point algorithm.
+    Args:
+    p (ndarray): 3x4 array of homogeneous coordinates of points in the first image.
+    q (ndarray): 3x4 array of homogeneous coordinates of corresponding points in the second image.
+    Returns: H (ndarray): 3x3 transformation matrix that maps points in the first image to their corresponding points in the second image.
+    """
     A = np.zeros((8, 9))
     for i in range(4):
         A[2*i, 0:3] = p[:, i]
@@ -74,18 +81,13 @@ def descriptor_point_match(template_descriptors, image_descriptors):
 
     # sort the best matches based on the lowest ssd
     best_matches.sort(key=lambda x: x.match_ssd)
+
+    if len(best_matches) < 4:
+        raise ValueError("Need at least 4 matches")
+    
     return best_matches
 
-def run(image, template):
-    template_gray = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
-    image_gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
-    
-    # 1. SIFT
-    sift = cv.SIFT_create() # ignore "known member" remember
-    template_keypoints, template_descriptors = sift.detectAndCompute(template_gray, None)
-    image_keypoints, image_descriptors = sift.detectAndCompute(image_gray, None)
-
-
+def get_keypoints_and_descriptors_from_ransac(template_keypoints, image_keypoints, template_descriptors, image_descriptors):
     template_points = []
     for keypoint in template_keypoints:
         template_points.append(Point(int(keypoint.pt[0]), int(keypoint.pt[1])))
@@ -95,10 +97,9 @@ def run(image, template):
         image_points.append(Point(int(keypoint.pt[0]), int(keypoint.pt[1])))
 
     # ransac to filter keypoints
-    ransac = Ransac(distance_threshold=10, sample_points_num=30)
+    ransac = Ransac(distance_threshold=20, sample_points_num=30)
     filtered_template_points, _ = ransac.run_ransac(template_points, iterations=100)
     filtered_image_points, _ = ransac.run_ransac(image_points, iterations=100)
-
 
     # get filtered descriptors based on filtered RANSAC points
     filtered_template_descriptors = []
@@ -110,16 +111,54 @@ def run(image, template):
     for point in filtered_image_points:
         index = image_points.index(point)
         filtered_image_descriptors.append(image_descriptors[index])
+
+    return template_points, image_points, filtered_template_descriptors, filtered_image_descriptors
+
+def run(image, template):
+    template_gray = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
+    image_gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     
-    best_matches = descriptor_point_match(filtered_template_descriptors, filtered_image_descriptors)
+    # 1. SIFT
+    sift = cv.SIFT_create() # ignore "known member" remember
+    template_keypoints, template_descriptors = sift.detectAndCompute(template_gray, None)
+    image_keypoints, image_descriptors = sift.detectAndCompute(image_gray, None)
 
-    if len(best_matches) < 4:
-        raise ValueError("not enough keypoints")
 
-    # TODO: may need checks to see if the 4 are good enough
+    # filtered_template_keypoints, filtered_image_keypoints, filtered_template_descriptors, filtered_image_descriptors = get_keypoints_and_descriptors_from_ransac(template_keypoints, 
+    #                                                                                                                    image_keypoints, 
+    #                                                                                                                    template_descriptors,
+    #                                                                                                        image_descriptors)
+    
+
+    # TODO: RANSAC POINTS TOGGLE
+    # template_keypoints = filtered_template_keypoints
+    # template_descriptors = filtered_template_descriptors
+    # # image_keypoints = filtered_image_keypoints
+    # # image_descriptors = filtered_image_descriptors
+
+    best_matches = descriptor_point_match(template_descriptors, image_descriptors)
+    
     best_4_matches = best_matches[:4]
 
-    draw_matches(template, image, template_keypoints, image_keypoints, best_4_matches)
+    if len(best_4_matches) != 4:
+        raise ValueError("Need exactly 4 matches")
+
+    # prepare points into homogenous coordinates for the homography 
+    p = np.zeros((3, 4))
+    q = np.zeros((3, 4))
+    for i, match in enumerate(best_4_matches):  
+        template_point = template_keypoints[match.template_point_index]
+        image_point = image_keypoints[match.image_point_index]
+
+        p[:, i] = np.array([template_point.pt[0], template_point.pt[1], 1])
+        q[:, i] = np.array([image_point.pt[0], image_point.pt[1], 1])
+
+    H = four_point_algorithm(p, q)
+
+    print(H)
+
+
+    #draw_matches(template, image, template_keypoints, image_keypoints, best_4_matches)
     
     print(best_4_matches)
     #H = four_point_algorithm(template_points, image_points)
@@ -128,10 +167,12 @@ def run(image, template):
 def draw_matches(template, image, template_keypoints, image_keypoints, matches):
     for match in matches:
         template_point = template_keypoints[match.template_point_index]
-        cv.drawMarker(template, (int(template_point.pt[0]), int(template_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+        #cv.drawMarker(template, (int(template_point.pt[0]), int(template_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
 
         image_point = image_keypoints[match.image_point_index]
         cv.drawMarker(image, (int(image_point.pt[0]), int(image_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+        #cv.drawMarker(image, (int(image_point.x), int(image_point.y)), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+
 
     #cv.imshow(" ", template)
     cv.imshow(" ", image)
