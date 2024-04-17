@@ -451,10 +451,10 @@ def find_matching_icons_2(
                 best_scale_factor_bbox, img_dimensions
             )
 
-        assert layer_bbox is not None
-        bbox = layer_bbox.to_absolute((image.shape[1], image.shape[0]), 0)
-        match = Match(Path(label).stem, min_difference, bbox)
-        matches.append(match)
+        if layer_bbox is not None:
+            bbox = layer_bbox.to_absolute((image.shape[1], image.shape[0]), 0)
+            match = Match(Path(label).stem, min_difference, bbox)
+            matches.append(match)
 
         # print(repr(match))
         # render(image, previous_layer_bbox)
@@ -493,7 +493,8 @@ def match_template(image: Image, template: Image):
     )
 
     # iterate through the image and calculate the correlation
-    for y in tqdm(range(image_height - template_height + 1), desc="match_template y"):
+    # for y in tqdm(range(image_height - template_height + 1), desc="match_template y"):
+    for y in range(image_height - template_height + 1):
         for x in range(image_width - template_width + 1):
 
             patch1 = image[y : y + template_height, x : x + template_width]
