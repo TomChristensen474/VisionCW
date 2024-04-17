@@ -5,40 +5,42 @@ import cv2 as cv
 from dataclasses import dataclass
 import numpy as np
 
+from ransac import Point, Ransac
+
 def task3(folderName: str) -> float:
-    # TODO: don't harcode paths
-    path_dir = os.getcwd() + "/IconDataset/png/01-lighthouse.png"
-
+    # TODO: remove
+    path_dir = os.getcwd() + "/datasets/IconDataset/png/01-lighthouse.png"
     img = cv.imread(str(path_dir))
-
-    get_blobs(img=img)
+    run(img=img)
  
     return 0.0
 
-def get_blobs(img):
-    GAUSSIAN_SIZE = 3
-    GAUSSIAN_SD = 0
-    img_gaussian = cv.GaussianBlur(img, (GAUSSIAN_SIZE, GAUSSIAN_SIZE), GAUSSIAN_SD)
-    img_gray = cv.cvtColor(img_gaussian, cv.COLOR_BGR2GRAY)
+def run(img):
+    img_gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+
+    sift = cv.SIFT_create() # ignore "known member" remember
+
+    keypoints, descriptors = sift.detectAndCompute(img_gray, None)
+    #datasets/Task3Dataset/images/test_image_1.png
+    # converts the SIFT detectAndCompute keypoints to Point (dataclass) form for ransac
+    points = []
+    for keypoint in keypoints:
+        points.append(Point(int(keypoint.pt[0]), int(keypoint.pt[1])))
+
+    # img_keypoints_original = np.copy(img)  
+    # img_keypoints_original = cv.drawKeypoints(img, keypoints, img_keypoints_original, color=(0, 255, 0), flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    # cv.imshow(" ", img_keypoints_original)
+    # cv.waitKey(0)  
+    # cv.destroyAllWindows()
+
     
-    kernel_size = 3
-    img_laplacian = cv.Laplacian(img_gray, cv.CV_16S, ksize=kernel_size, scale=0.5)
-    img_output = cv.convertScaleAbs(img_laplacian)
-    cv.imshow("", img_output)
-    cv.waitKey(0)
-    return
-    # filter_scales = []
-    # for filter_scale in filter_scales:
-    #     pass
-    # # 1. 
-    # pass
+    ransac = Ransac(distance_threshold=10, sample_points_num=30)  
 
-def get_descriptor():
-    pass
-
-
-def get_feature():
-    pass
+    try:
+        best_points, best_line = ransac.run_ransac(points=points, iterations=100) 
+        print(f"number keypoints removed: {len(keypoints) - len(best_points)} / {len(keypoints)}")
+    except ValueError as e:
+        print(e)
 
 
 if __name__ == "__main__":
