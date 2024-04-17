@@ -11,6 +11,7 @@ class TemplateImageKeypointMatch:
     template_point_index: int 
     image_point_index: int
 
+
 # for point algorithm from lectures
 def four_point_algorithm(p, q):
     """
@@ -114,67 +115,125 @@ def get_keypoints_and_descriptors_from_ransac(template_keypoints, image_keypoint
 
     return template_points, image_points, filtered_template_descriptors, filtered_image_descriptors
 
-def run(image, template):
-    template_gray = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
-    image_gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+"""
+points:
+[[x1,y1],
+[x2,y2],
+[x3,y3],
+[x4,y4]]
+"""
+def apply_homography_transform(H, points):
+    """
+    points_homogeneous
+    [[x1 x2 x3 x4],
+    [y1,y2,y3,y4],
+    [1,1,1,1]]
+    """
+    points_homogeneous = np.vstack([points.T, np.ones((1, points.shape[0]))])
+
+    transformed_points = H @ points_homogeneous
     
-    # 1. SIFT
-    sift = cv.SIFT_create() # ignore "known member" remember
-    template_keypoints, template_descriptors = sift.detectAndCompute(template_gray, None)
-    image_keypoints, image_descriptors = sift.detectAndCompute(image_gray, None)
+    transformed_points /= transformed_points[2, :] 
 
+    """
+    points_cartesian_form
+    [[x1,y1],
+    [x2,y2],
+    [x3,y3],
+    [x4,y4]]
+    """
+    points_cartesian_form = transformed_points[:2, :].T
 
-    # filtered_template_keypoints, filtered_image_keypoints, filtered_template_descriptors, filtered_image_descriptors = get_keypoints_and_descriptors_from_ransac(template_keypoints, 
-    #                                                                                                                    image_keypoints, 
-    #                                                                                                                    template_descriptors,
-    #                                                                                                        image_descriptors)
-    
+    return points_cartesian_form
 
-    # TODO: RANSAC POINTS TOGGLE
-    # template_keypoints = filtered_template_keypoints
-    # template_descriptors = filtered_template_descriptors
-    # # image_keypoints = filtered_image_keypoints
-    # # image_descriptors = filtered_image_descriptors
-
-    best_matches = descriptor_point_match(template_descriptors, image_descriptors)
-    
-    best_4_matches = best_matches[:4]
-
-    if len(best_4_matches) != 4:
+def p_q_formatter(best_matches, template_keypoints, image_keypoints):
+    if len(best_matches) != 4:
         raise ValueError("Need exactly 4 matches")
 
     # prepare points into homogenous coordinates for the homography 
     p = np.zeros((3, 4))
     q = np.zeros((3, 4))
-    for i, match in enumerate(best_4_matches):  
+    for i, match in enumerate(best_matches):  
         template_point = template_keypoints[match.template_point_index]
         image_point = image_keypoints[match.image_point_index]
 
         p[:, i] = np.array([template_point.pt[0], template_point.pt[1], 1])
         q[:, i] = np.array([image_point.pt[0], image_point.pt[1], 1])
+    
+    return p,q
 
+def run(image, template):
+    template_gray = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
+    image_gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    
+    # 1. SIFT
+    sift = cv.SIFT_create() # ignore "known member" error
+    template_keypoints, template_descriptors = sift.detectAndCompute(template_gray, None)
+    image_keypoints, image_descriptors = sift.detectAndCompute(image_gray, None)
+
+    # get the best 4 matches (image and corresponding template keypoint matches)
+    best_matches = descriptor_point_match(template_descriptors, image_descriptors)
+    
+    print(best_matches)
+    print("")
+    #best_4_matches = best_matches[:4]
+
+    best_4_matches = [best_matches[0],best_matches[3],best_matches[6],best_matches[10]]
+
+    # format the template and image keypoints into the p,q form
+    # to be used for the four point algorithm
+    p,q = p_q_formatter(best_matches=best_4_matches, 
+                        template_keypoints=template_keypoints, 
+                        image_keypoints=image_keypoints)
+    
+    # homography matrix
     H = four_point_algorithm(p, q)
 
-    print(H)
+    # get corners in template image
+    template_corners = np.array([
+        [0, 0],  # top left
+        [template.shape[1], 0],  # top right
+        [template.shape[1], template.shape[0]],  # bottom right
+        [0, template.shape[0]]  # bottom left
+    ])
 
+    # transform the corners in the template image using the homography
+    homography_transformed_points = apply_homography_transform(H=H, points=template_corners)
 
-    #draw_matches(template, image, template_keypoints, image_keypoints, best_4_matches)
+    print(homography_transformed_points)
+
+    draw_matches_on_image(image=image, 
+                          image_keypoints=image_keypoints,
+                          matches=best_4_matches)
     
-    print(best_4_matches)
-    #H = four_point_algorithm(template_points, image_points)
+    # draw_matches_on_template(template=template, 
+    #                       template_keypoints=template_keypoints,
+    #                       matches=best_4_matches)
 
-
-def draw_matches(template, image, template_keypoints, image_keypoints, matches):
+"""
+draws the keypoints on the template keypoints which matched to image keypoints
+"""
+def draw_matches_on_template(template, template_keypoints, matches):
     for match in matches:
         template_point = template_keypoints[match.template_point_index]
-        #cv.drawMarker(template, (int(template_point.pt[0]), int(template_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+        cv.drawMarker(template, (int(template_point.pt[0]), int(template_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
 
+    cv.imshow(" ", template)
+    cv.waitKey(0)
+    cv.destroyAllWindows()
+
+"""
+draws the keypoints on the image which matched to keypoints on templates
+"""
+def draw_matches_on_image(image, image_keypoints, matches):
+    print(len(matches))
+    for match in matches:
         image_point = image_keypoints[match.image_point_index]
+        print(int(image_point.pt[0]))
+        print(int(image_point.pt[1]))
+        print("")
         cv.drawMarker(image, (int(image_point.pt[0]), int(image_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
-        #cv.drawMarker(image, (int(image_point.x), int(image_point.y)), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
 
-
-    #cv.imshow(" ", template)
     cv.imshow(" ", image)
     cv.waitKey(0)
     cv.destroyAllWindows()
