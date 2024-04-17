@@ -25,7 +25,7 @@ class Ransac:
         q (ndarray): 3x4 array of homogeneous coordinates of corresponding points in the second image.
         Returns: H (ndarray): 3x3 transformation matrix that maps points in the first image to their corresponding points in the second image.
         """
-        A = np.zeros((8, 9))
+        A = np.zeros((2*num_points, 9))
         for i in range(num_points):
             A[2 * i, 0:3] = p[:, i]
             A[2 * i, 6:9] = -q[0, i] * p[:, i]
@@ -52,7 +52,7 @@ class Ransac:
     # takes the points not fitted to line for calculation
     def calculate_homography_outliers(
         self, points: list[TemplateImageKeypointMatch]
-    ) -> tuple[list[Point], list[Point], Homography]:
+    ) -> tuple[list[inlier], list[Point], Homography]:
         outliers = []
         inliers = []
 
@@ -90,7 +90,8 @@ class Ransac:
 
             if distance > self.distance_threshold:
                 outliers.append(point)
-            else: inliers.append(point)
+            else:
+                inliers.append(inlier(template_point=points[index].template_point, image_point=points[index].image_point))
 
         return inliers, outliers, homography
 
@@ -102,21 +103,23 @@ class Ransac:
 
         return random.sample(points, self.sample_points_num) # random choice of 4 points
     
-    # def refine_homography(self, inliers: list[Point]):
-    #     p = np.zeros((3, len(inliers)))
-    #     q = np.zeros((3, len(inliers)))
+    def refine_homography(self, inliers: list[inlier]) -> Homography:
+        p = np.zeros((3, len(inliers)))
+        q = np.zeros((3, len(inliers)))
 
-    #     for i, point in enumerate(inliers):
-    #         p[0, i] = point.template_point.x
-    #         p[1, i] = point.template_point.y
-    #         p[2, i] = 1
+        for i, point in enumerate(inliers):
+            p[0, i] = point.template_point.x
+            p[1, i] = point.template_point.y
+            p[2, i] = 1
 
-    #         q[0, i] = point.image_point.x
-    #         q[1, i] = point.image_point.y
-    #         q[2, i] = 1
+            q[0, i] = point.image_point.x
+            q[1, i] = point.image_point.y
+            q[2, i] = 1
+
+        return self.four_point_algorithm(p, q, len(inliers))
 
 
-    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100) -> tuple[Homography, list[Point], list[Point]]:
+    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100) -> tuple[Homography, list[inlier], list[Point]]:
         # best_outlier_count = None  # fewer outliers better
         count_inliers = 0
         best_outliers = []
@@ -137,4 +140,4 @@ class Ransac:
         if not best_homography:  # if empty arry or best line is none
             raise ValueError("no homography found")
 
-        return best_homography, best_inliers, best_outliers
+        return self.refine_homography(best_inliers), best_inliers, best_outliers
