@@ -174,10 +174,8 @@ def run(image, template):
     # get the best 4 matches (image and corresponding template keypoint matches)
     best_matches = descriptor_point_match(template_descriptors, image_descriptors)
     
-    print(best_matches)
-    print("")
+    #  TODO: ransac should sample the matches
     #best_4_matches = best_matches[:4]
-
     best_4_matches = [best_matches[0],best_matches[3],best_matches[6],best_matches[10]]
 
     # format the template and image keypoints into the p,q form
@@ -208,7 +206,7 @@ def run(image, template):
     #                       image_keypoints=image_keypoints,
     #                       matches=best_4_matches)
     
-    draw_int_coordinates(img=image,coords=homography_transformed_points_ints)
+    draw_bbox_points_on_image(img=image,corner_coordinates=homography_transformed_points_ints)
 
     # draw_matches_on_template(template=template, 
     #                       template_keypoints=template_keypoints,
@@ -226,12 +224,9 @@ def draw_matches_on_template(template, template_keypoints, matches):
     cv.waitKey(0)
     cv.destroyAllWindows()
 
-def draw_int_coordinates(img, coords):
-    for coord in coords:
-        x,y = coord[0], coord[1]
-        # print(int(image_point.pt[0]))
-        # print(int(image_point.pt[1]))
-        # print("")
+def draw_bbox_points_on_image(img, corner_coordinates):
+    for corner in corner_coordinates:
+        x,y = corner[0], corner[1]
         cv.drawMarker(img, (int(x), int(y)), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
 
     cv.imshow(" ", img)
@@ -245,9 +240,6 @@ def draw_matches_on_image(image, image_keypoints, matches):
     print(len(matches))
     for match in matches:
         image_point = image_keypoints[match.image_point_index]
-        # print(int(image_point.pt[0]))
-        # print(int(image_point.pt[1]))
-        # print("")
         cv.drawMarker(image, (int(image_point.pt[0]), int(image_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
 
     cv.imshow(" ", image)
@@ -266,8 +258,6 @@ def task3(folderName: str):
 
     image_path = icon_dataset_path / "01-lighthouse.png"
     image = cv.imread(str(image_path))
-
-    # sift = SIFT.SIFT(image)
 
 
 if __name__ == "__main__":
