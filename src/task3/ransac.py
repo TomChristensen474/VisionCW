@@ -1,98 +1,140 @@
 from dataclasses import dataclass
-from typing import List, Tuple
+from task3 import TemplateImageKeypointMatch, apply_homography_transform, Point, Homography
+
 import numpy as np
+import random
 
 @dataclass
-class LineEquation:
-    m: float  # gradient
-    c: float  # y int
+class inlier:
+    template_point: Point
+    image_point: Point
 
-@dataclass
-class Point:
-    x: int
-    y: int
 
 class Ransac:
 
-    def __init__(self, distance_threshold: float = 100, sample_points_num: int = 1):
+    def __init__(self, distance_threshold: float = 10):
         self.distance_threshold = distance_threshold
-        self.sample_points_num = sample_points_num
+        self.sample_points_num = 4  # TODO try picking 4 from a larger sample size with best SSD
+
+    # four point algorithm from lectures
+    def four_point_algorithm(self, p: np.ndarray, q: np.ndarray, num_points=4) -> Homography:
+        """
+        Estimate a 2D transformation using the four point algorithm.
+        Args:
+        p (ndarray): 3x4 array of homogeneous coordinates of points in the first image.
+        q (ndarray): 3x4 array of homogeneous coordinates of corresponding points in the second image.
+        Returns: H (ndarray): 3x3 transformation matrix that maps points in the first image to their corresponding points in the second image.
+        """
+        A = np.zeros((8, 9))
+        for i in range(num_points):
+            A[2 * i, 0:3] = p[:, i]
+            A[2 * i, 6:9] = -q[0, i] * p[:, i]
+            A[2 * i + 1, 3:6] = p[:, i]
+            A[2 * i + 1, 6:9] = -q[1, i] * p[:, i]
+
+        # Solve the homogeneous linear system using SVD
+        U, D, Vt = np.linalg.svd(A)
+        H = Vt[-1, :].reshape(3, 3)
+
+        # Normalize the solution to ensure H[2, 2] = 1
+        H = H / H[2, 2]
+        H = Homography(matrix=H)
+        return H
+
+    """
+    points:
+    [[x1,y1],
+    [x2,y2],
+    [x3,y3],
+    [x4,y4]]
+    """
 
     # takes the points not fitted to line for calculation
-    def calculate_inliers_and_outliers(self, m_term:float, c_term:float, unselected_points: List[Point]) -> Tuple[List[Point],List[Point]]:
-        inliers = []
+    def calculate_homography_outliers(
+        self, points: list[TemplateImageKeypointMatch]
+    ) -> tuple[list[Point], list[Point], Homography]:
         outliers = []
+        inliers = []
 
-        # d = |ax1 + by1 + c| / (a^2+b^2)^1/2
-        # where p(x1,x2) and ax + by + c = 0, 
-        def calculate_distance_from_line(x1, y1, a, c):
-            b = -1  # from mx - y + c = 0
-            return abs( (a * x1) + (b * y1) + c) / np.sqrt(a**2 + b**2)
+        def calc_homography(points: list[TemplateImageKeypointMatch]) -> Homography:
+            p = np.zeros((3, 4))
+            q = np.zeros((3, 4))
 
-        for point in unselected_points:
+            for i, point in enumerate(points):  # should be 4 points in list
+                p[0, i] = point.template_point.x
+                p[1, i] = point.template_point.y
+                p[2, i] = 1
 
-            distance = calculate_distance_from_line(x1=point.x, y1=point.y, a=m_term, c=c_term) 
-            if distance <= self.distance_threshold:
-                inliers.append(point)
-            else:
-                outliers.append(point)
+                q[0, i] = point.image_point.x
+                q[1, i] = point.image_point.y
+                q[2, i] = 1
+
+            return self.four_point_algorithm(p, q)
+
+        def apply_homography(points: list[TemplateImageKeypointMatch], homography: Homography) -> list[Point]:
+            points_to_transform = np.array([[point.template_point.x, point.template_point.y] for point in points])
+            
+            return apply_homography_transform(homography, points_to_transform)
+
+
+        sampled_points = self.sample_points(points)
+        homography = calc_homography(sampled_points)
+        transformed_points = apply_homography(points, homography)
+
+        def calculate_distance_between_points(point1: Point, point2: Point) -> float:
+            return np.sqrt((point1.x - point2.x) ** 2 + (point1.y - point2.y) ** 2)
         
-        return inliers, outliers
+        for index, point in enumerate(transformed_points):
+            point2 = points[index].image_point
+            distance = calculate_distance_between_points(point, point2)
 
+            if distance > self.distance_threshold:
+                outliers.append(point)
+            else: inliers.append(point)
+
+        return inliers, outliers, homography
 
     # random sampling of points for line fitting and inlier outlier calculation
-    def sample_points(self, points: List[Point]) -> Tuple[List[Point], List[Point]]:
-        chosen_point_indices = np.random.choice(len(points), self.sample_points_num, replace=False)
-        sampled_points = []
-        unselected_points = []
-        for i, point in enumerate(points):
-            if i in chosen_point_indices:
-                sampled_points.append(point)
-            else:
-                unselected_points.append(point)
+    def sample_points(self, points: list[TemplateImageKeypointMatch]) -> list[TemplateImageKeypointMatch]:
+        # random_sample = random.sample(points, 30) # random choice
+        # sorted_sample = sorted(random_sample, key=lambda x: x.match_ssd)
+        # return sorted_sample[:4]
 
-        return sampled_points, unselected_points
+        return random.sample(points, self.sample_points_num) # random choice of 4 points
     
-    
+    # def refine_homography(self, inliers: list[Point]):
+    #     p = np.zeros((3, len(inliers)))
+    #     q = np.zeros((3, len(inliers)))
 
-    # fit points to linear line using least squares
-    def fit_line(self, selected_points: List[Point]) -> Tuple[float,float]:
-        x_coords = []
-        y_coords = []
-        for point in selected_points:
-            x_coords.append(point.x)
-            y_coords.append(point.y)
+    #     for i, point in enumerate(inliers):
+    #         p[0, i] = point.template_point.x
+    #         p[1, i] = point.template_point.y
+    #         p[2, i] = 1
 
-        coefficients = np.polyfit(np.asarray(x_coords), np.asarray(y_coords), 1)
-        m, c = coefficients
-        return m,c
-    
-    def run_ransac(self, points: List[Point], iterations=5) -> Tuple[List[Point], LineEquation]:
-        best_outlier_count = float("inf")  # less outliers is better
-        best_points = []
-        best_line = None
+    #         q[0, i] = point.image_point.x
+    #         q[1, i] = point.image_point.y
+    #         q[2, i] = 1
+
+
+    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100) -> tuple[Homography, list[Point], list[Point]]:
+        # best_outlier_count = None  # fewer outliers better
+        count_inliers = 0
+        best_outliers = []
+        best_inliers = []
+        best_homography = None
 
         for i in range(iterations):
-            selected_points, unselected_points = self.sample_points(points=points)
-            m,c = self.fit_line(selected_points=selected_points)
-            inliers, outliers = self.calculate_inliers_and_outliers(m_term=m, c_term=c, unselected_points=unselected_points)
-            
-            if len(outliers) < best_outlier_count:
-                best_points = inliers
-                best_line = LineEquation(m=m,c=c)
-                best_outlier_count = len(outliers)
+            # sampled_points = self.sample_points(points)
+            inliers, outliers, homography = self.calculate_homography_outliers(points)
 
-        if not best_points or not best_line:  # if empty arry or best line is none
-            raise ValueError("no points were found")
+            if len(inliers) > count_inliers:
+                count_inliers = len(inliers)
+                best_inliers = inliers
+                best_outliers = outliers
+                best_homography = homography
         
-        # re fit and get parameters based on best line
-        final_m, final_c = self.fit_line(selected_points=best_points)
-        best_line = LineEquation(m=final_m, c=final_c)
 
-        return best_points, best_line
+        if not best_homography:  # if empty arry or best line is none
+            raise ValueError("no homography found")
 
-if __name__ == '__main__':
-    rsc = Ransac()
-    points = [Point(1,6), Point(3,7)]
-    new_points = rsc.run_ransac(points=points)
-    
+        return best_homography, best_inliers, best_outliers

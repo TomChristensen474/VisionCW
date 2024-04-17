@@ -3,48 +3,32 @@ import os
 from pathlib import Path
 import cv2 as cv
 import numpy as np
-from ransac import Point, Ransac
+import numpy.typing as npt
+
+import ransac
+
+@dataclass
+class Point:
+    x: int
+    y: int
+
+
+@dataclass
+class Homography:
+    matrix: npt.NDArray[np.float64]  # 3x3 matrix
+
 
 @dataclass
 class TemplateImageKeypointMatch:
     match_ssd: float
-    template_point_index: int 
-    image_point_index: int
+    template_point: Point
+    image_point: Point
 
 
-# for point algorithm from lectures
-def four_point_algorithm(p, q):
-    """
-    Estimate a 2D transformation using the four point algorithm.
-    Args:
-    p (ndarray): 3x4 array of homogeneous coordinates of points in the first image.
-    q (ndarray): 3x4 array of homogeneous coordinates of corresponding points in the second image.
-    Returns: H (ndarray): 3x3 transformation matrix that maps points in the first image to their corresponding points in the second image.
-    """
-    A = np.zeros((8, 9))
-    for i in range(4):
-        A[2*i, 0:3] = p[:, i]
-        A[2*i, 6:9] = -q[0, i]*p[:, i]
-        A[2*i+1, 3:6] = p[:, i]
-        A[2*i+1, 6:9] = -q[1, i]*p[:, i]
-
-    # Solve the homogeneous linear system using SVD
-    U, D, Vt = np.linalg.svd(A)
-    H = Vt[-1, :].reshape(3, 3)
-
-    # Normalize the solution to ensure H[2, 2] = 1
-    H = H / H[2, 2]
-    
-    return H
-
-def task3_run(folderName:str):
-    path_dir_template = os.getcwd() + "/datasets/IconDataset/png/01-lighthouse.png"
-    path_dir_image = os.getcwd() + "/datasets/Task3Dataset/images/test_image_2.png"
-
-    template = cv.imread(str(path_dir_template))
-    image = cv.imread(str(path_dir_image))
-
-    run(image, template)
+@dataclass
+class DescribedKeypoints:
+    keypoints: list[cv.KeyPoint]
+    descriptors: list[np.ndarray]
 
 
 def compare_descriptors_ssd(descriptor1, descriptor2):
@@ -58,71 +42,44 @@ def compare_descriptors_ssd(descriptor1, descriptor2):
 this will match descriptors in template with descriptors in image and return 
 best matching points which are sorted based on lowest difference metric (e.g. lowest SSD)
 """
-def descriptor_point_match(template_descriptors, image_descriptors):
-    best_matches = []
+def descriptor_point_match(described_template_keypoints, described_image_keypoints):
+    best_matches: list[TemplateImageKeypointMatch] = []
     # for each template keypoint
-    for i, template_descriptor in enumerate(template_descriptors):
+    for i, template_descriptor in enumerate(described_template_keypoints.descriptors):
         min_ssd = float("inf")
         best_image_point_index = None
         # find the best matching keypoint in the image
-        for j, image_descriptor in enumerate(image_descriptors):
+        for j, image_descriptor in enumerate(described_image_keypoints.descriptors):
             ssd = compare_descriptors_ssd(template_descriptor,image_descriptor)
             if ssd < min_ssd:
                 min_ssd = ssd
                 best_image_point_index = j
 
+
         # add the best matching (template_point,image_point) pair with the ssd      
-        if best_image_point_index:  
-            best_matches.append(TemplateImageKeypointMatch(match_ssd=min_ssd, 
-                                                       template_point_index=i, 
-                                                       image_point_index=best_image_point_index))
-        else:
-            raise ValueError("error")
-
-
-    # sort the best matches based on the lowest ssd
-    best_matches.sort(key=lambda x: x.match_ssd)
+        if best_image_point_index:
+            template_point = Point(described_template_keypoints.keypoints[i].pt[0],
+                                      described_template_keypoints.keypoints[i].pt[1])
+            
+            image_point = Point(described_image_keypoints.keypoints[best_image_point_index].pt[0],
+                                   described_image_keypoints.keypoints[best_image_point_index].pt[1])
+            
+            best_matches.append(TemplateImageKeypointMatch(min_ssd,
+                                                           template_point, 
+                                                           image_point))
+            
+        # else:
+        #     raise ValueError("error")
 
     if len(best_matches) < 4:
         raise ValueError("Need at least 4 matches")
     
+    # sort the best matches based on the lowest ssd
+    best_matches.sort(key=lambda x: x.match_ssd)
+    
     return best_matches
 
-def get_keypoints_and_descriptors_from_ransac(template_keypoints, image_keypoints, template_descriptors, image_descriptors):
-    template_points = []
-    for keypoint in template_keypoints:
-        template_points.append(Point(int(keypoint.pt[0]), int(keypoint.pt[1])))
-
-    image_points = []
-    for keypoint in image_keypoints:
-        image_points.append(Point(int(keypoint.pt[0]), int(keypoint.pt[1])))
-
-    # ransac to filter keypoints
-    ransac = Ransac(distance_threshold=20, sample_points_num=30)
-    filtered_template_points, _ = ransac.run_ransac(template_points, iterations=100)
-    filtered_image_points, _ = ransac.run_ransac(image_points, iterations=100)
-
-    # get filtered descriptors based on filtered RANSAC points
-    filtered_template_descriptors = []
-    for point in filtered_template_points:
-        index = template_points.index(point)
-        filtered_template_descriptors.append(template_descriptors[index])
-
-    filtered_image_descriptors = []
-    for point in filtered_image_points:
-        index = image_points.index(point)
-        filtered_image_descriptors.append(image_descriptors[index])
-
-    return template_points, image_points, filtered_template_descriptors, filtered_image_descriptors
-
-"""
-points:
-[[x1,y1],
-[x2,y2],
-[x3,y3],
-[x4,y4]]
-"""
-def apply_homography_transform(H, points):
+def apply_homography_transform(H: Homography, points: npt.NDArray[np.uint8]) -> list[Point]:
     """
     points_homogeneous
     [[x1 x2 x3 x4],
@@ -131,9 +88,9 @@ def apply_homography_transform(H, points):
     """
     points_homogeneous = np.vstack([points.T, np.ones((1, points.shape[0]))])
 
-    transformed_points = H @ points_homogeneous
-    
-    transformed_points /= transformed_points[2, :] 
+    transformed_points = H.matrix @ points_homogeneous
+
+    transformed_points /= transformed_points[2, :]
 
     """
     points_cartesian_form
@@ -144,25 +101,15 @@ def apply_homography_transform(H, points):
     """
     points_cartesian_form = transformed_points[:2, :].T
 
-    return points_cartesian_form
+    transformed_points = []
 
-def p_q_formatter(best_matches, template_keypoints, image_keypoints):
-    if len(best_matches) != 4:
-        raise ValueError("Need exactly 4 matches")
+    for point in points_cartesian_form:
+        point = Point(int(point[0]), int(point[1]))
+        transformed_points.append(point)
 
-    # prepare points into homogenous coordinates for the homography 
-    p = np.zeros((3, 4))
-    q = np.zeros((3, 4))
-    for i, match in enumerate(best_matches):  
-        template_point = template_keypoints[match.template_point_index]
-        image_point = image_keypoints[match.image_point_index]
+    return transformed_points
 
-        p[:, i] = np.array([template_point.pt[0], template_point.pt[1], 1])
-        q[:, i] = np.array([image_point.pt[0], image_point.pt[1], 1])
-    
-    return p,q
-
-def run(image, template):
+def run(image, template) -> bool:
     template_gray = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
     image_gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     
@@ -171,23 +118,40 @@ def run(image, template):
     template_keypoints, template_descriptors = sift.detectAndCompute(template_gray, None)
     image_keypoints, image_descriptors = sift.detectAndCompute(image_gray, None)
 
-    # get the best 4 matches (image and corresponding template keypoint matches)
-    best_matches = descriptor_point_match(template_descriptors, image_descriptors)
-    
-    #  TODO: ransac should sample the matches
-    #best_4_matches = best_matches[:4]
-    best_4_matches = [best_matches[0],best_matches[3],best_matches[6],best_matches[10]]
+    described_template_keypoints = DescribedKeypoints(keypoints=template_keypoints, descriptors=template_descriptors)
+    described_image_keypoints = DescribedKeypoints(keypoints=image_keypoints, descriptors=image_descriptors)
 
-    # format the template and image keypoints into the p,q form
-    # to be used for the four point algorithm
-    p,q = p_q_formatter(best_matches=best_4_matches, 
-                        template_keypoints=template_keypoints, 
-                        image_keypoints=image_keypoints)
+    # for i in range(len(template_keypoints)):
+    #     cv.drawMarker(template, (int(template_keypoints[i].pt[0]), int(template_keypoints[i].pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+    # cv.imshow("template", template)
+    # cv.waitKey(0)
     
-    # homography matrix
-    H = four_point_algorithm(p, q)
+    # for i in range(len(image_keypoints)):
+    #     cv.drawMarker(image, (int(image_keypoints[i].pt[0]), int(image_keypoints[i].pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
 
-    # get corners in template image
+    # cv.imshow("image", image)
+    # cv.waitKey(0)
+    # get the best matches (image and corresponding template keypoint matches)
+    # 2. Match keypoints
+    best_matches = descriptor_point_match(described_template_keypoints, described_image_keypoints)
+
+    for best_match in best_matches:
+        cv.drawMarker(image, (int(best_match.image_point.x), int(best_match.image_point.y)), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+
+    cv.imshow("matches", image)
+    cv.waitKey(0)
+
+    # 3. Threshold to identify matches
+    if len(best_matches) < 10:
+        return False
+
+    # 4. RANSAC to get robust homography
+    rsc = ransac.Ransac(distance_threshold=2)
+    homography, inliers, outliers = rsc.run_ransac(best_matches, iterations=2000)
+
+    # 5. Apply homography to get bounding box for labelling
+
+    # # get corners in template image
     template_corners = np.array([
         [0, 0],  # top left
         [template.shape[1], 0],  # top right
@@ -195,57 +159,42 @@ def run(image, template):
         [0, template.shape[0]]  # bottom left
     ])
 
-    # transform the corners in the template image using the homography
-    homography_transformed_points = apply_homography_transform(H=H, points=template_corners)
+    bbox = apply_homography_transform(homography, template_corners)
+    # print(bbox)
 
-    # convert to integers
-    homography_transformed_points_ints = np.asarray(homography_transformed_points).astype(int)
-    print(homography_transformed_points_ints)
+    # # transform the corners in the template image using the homography
+    # homography_transformed_points = apply_homography_transform(H=H, points=template_corners)
+
+    # print(homography_transformed_points)
+    
+    # draw_points_on_image(image, inliers, (0, 255, 0))
+    # draw_points_on_image(image, outliers, (0, 0, 255))
+    draw_bbox(image, bbox)
+
+    return True
+    # draw_points_on_image(image, bbox)
 
     # draw_matches_on_image(image=image, 
     #                       image_keypoints=image_keypoints,
-    #                       matches=best_4_matches)
+    #                       matches=bbox)
     
-    draw_bbox_points_on_image(img=image,corner_coordinates=homography_transformed_points_ints)
-
     # draw_matches_on_template(template=template, 
     #                       template_keypoints=template_keypoints,
     #                       matches=best_4_matches)
 
-"""
-draws the keypoints on the template keypoints which matched to image keypoints
-"""
-def draw_matches_on_template(template, template_keypoints, matches):
-    for match in matches:
-        template_point = template_keypoints[match.template_point_index]
-        cv.drawMarker(template, (int(template_point.pt[0]), int(template_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+def draw_points_on_image(image, points, color=(0, 255, 0)):
+    for point in points:
+        cv.drawMarker(image, (point.x, point.y), color, markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
 
-    cv.imshow(" ", template)
+    cv.imshow("image", image)
     cv.waitKey(0)
     cv.destroyAllWindows()
 
-def draw_bbox_points_on_image(img, corner_coordinates):
-    for corner in corner_coordinates:
-        x,y = corner[0], corner[1]
-        cv.drawMarker(img, (int(x), int(y)), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
-
-    cv.imshow(" ", img)
+def draw_bbox(image, bbox):
+    cv.rectangle(image, (bbox[0].x, bbox[0].y), (bbox[2].x, bbox[2].y), (255, 0, 0), thickness=2)
+    cv.imshow("image", image)
     cv.waitKey(0)
     cv.destroyAllWindows()
-
-"""
-draws the keypoints on the image which matched to keypoints on templates
-"""
-def draw_matches_on_image(image, image_keypoints, matches):
-    print(len(matches))
-    for match in matches:
-        image_point = image_keypoints[match.image_point_index]
-        cv.drawMarker(image, (int(image_point.pt[0]), int(image_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
-
-    cv.imshow(" ", image)
-    cv.waitKey(0)
-    cv.destroyAllWindows()
-
 
 def task3(folderName: str):
     this_file = Path(__file__)
@@ -256,10 +205,54 @@ def task3(folderName: str):
     annotations_path = dataset_folder / "annotations"
     icon_dataset_path = datasets_folder / "IconDataset" / "png"
 
-    image_path = icon_dataset_path / "01-lighthouse.png"
-    image = cv.imread(str(image_path))
 
+    template_path = icon_dataset_path / "01-lighthouse.png"
+    image_path = images_path / "test_image_2.png"
+
+    # for file in tqdm(natsorted(os.listdir(images_path)), desc="test image"):
+    #     # Load test image
+    #     image = cv.imread(str(images_path / file))
+
+    #     icons_in_image = {}
+    #     csv_file = (annotations_path / file).with_suffix(".csv")
+    #     annotations = pd.read_csv(csv_file)
+
+    #     for label, top, left, bottom, right in annotations.values:
+    #         icons_in_image[label] = Icon(top, left, bottom, right, label)
+
+    #     print()
+    #     print(f"Test image: {file}")
+    #     print(f"Found matches:")
+    #     for match in matches:
+    #         correct_match = "YES:" if match.label in icons_in_image else "NO: "
+    #         print(f"\t{correct_match} {match}")
+
+    #     correct_icons_string = "\n\t".join([str(icon) for icon in icons_in_image.values()])
+    #     print(f"Icons in image:\n\t{correct_icons_string}")
+
+    #     labels_in_image = [icon.label for icon in icons_in_image.values()]
+    #     correct_matches = [match.label for match in matches if match.label in labels_in_image]
+    #     accuracy = len(correct_matches) / len(labels_in_image)
+    #     print(f"Accuracy: {accuracy * 100}%")
+
+    template = cv.imread(str(template_path))
+    image = cv.imread(str(image_path))
+    
+    # cv.imshow("template", template)
+    # cv.imshow("src_image", image)
+
+    run(image, template)
+
+    # sift = SIFT.SIFT(image)
+
+# def task3_run(folderName:str):
+#     path_dir_template = os.getcwd() + "/datasets/IconDataset/png/01-lighthouse.png"
+#     path_dir_image = os.getcwd() + "/datasets/Task3Dataset/images/test_image_2.png"
+
+#     template = cv.imread(str(path_dir_template))
+#     image = cv.imread(str(path_dir_image))
+
+#     run(image, template)
 
 if __name__ == "__main__":
-    #task3("Task3Dataset")
-    task3_run("Task3Dataset")
+    task3("Task3Dataset")
