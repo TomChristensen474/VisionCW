@@ -200,12 +200,16 @@ def run(image, template):
     # transform the corners in the template image using the homography
     homography_transformed_points = apply_homography_transform(H=H, points=template_corners)
 
-    print(homography_transformed_points)
+    # convert to integers
+    homography_transformed_points_ints = np.asarray(homography_transformed_points).astype(int)
+    print(homography_transformed_points_ints)
 
-    draw_matches_on_image(image=image, 
-                          image_keypoints=image_keypoints,
-                          matches=best_4_matches)
+    # draw_matches_on_image(image=image, 
+    #                       image_keypoints=image_keypoints,
+    #                       matches=best_4_matches)
     
+    draw_int_coordinates(img=image,coords=homography_transformed_points_ints)
+
     # draw_matches_on_template(template=template, 
     #                       template_keypoints=template_keypoints,
     #                       matches=best_4_matches)
@@ -222,6 +226,18 @@ def draw_matches_on_template(template, template_keypoints, matches):
     cv.waitKey(0)
     cv.destroyAllWindows()
 
+def draw_int_coordinates(img, coords):
+    for coord in coords:
+        x,y = coord[0], coord[1]
+        # print(int(image_point.pt[0]))
+        # print(int(image_point.pt[1]))
+        # print("")
+        cv.drawMarker(img, (int(x), int(y)), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+
+    cv.imshow(" ", img)
+    cv.waitKey(0)
+    cv.destroyAllWindows()
+
 """
 draws the keypoints on the image which matched to keypoints on templates
 """
@@ -229,9 +245,9 @@ def draw_matches_on_image(image, image_keypoints, matches):
     print(len(matches))
     for match in matches:
         image_point = image_keypoints[match.image_point_index]
-        print(int(image_point.pt[0]))
-        print(int(image_point.pt[1]))
-        print("")
+        # print(int(image_point.pt[0]))
+        # print(int(image_point.pt[1]))
+        # print("")
         cv.drawMarker(image, (int(image_point.pt[0]), int(image_point.pt[1])), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
 
     cv.imshow(" ", image)
