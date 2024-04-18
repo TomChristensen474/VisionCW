@@ -5,10 +5,9 @@ import numpy as np
 import random
 
 @dataclass
-class inlier:
+class PointMatch:
     template_point: Point
     image_point: Point
-
 
 class Ransac:
 
@@ -41,18 +40,10 @@ class Ransac:
         H = Homography(matrix=H)
         return H
 
-    """
-    points:
-    [[x1,y1],
-    [x2,y2],
-    [x3,y3],
-    [x4,y4]]
-    """
-
     # takes the points not fitted to line for calculation
     def calculate_homography_outliers(
         self, points: list[TemplateImageKeypointMatch]
-    ) -> tuple[list[inlier], list[Point], Homography]:
+    ) -> tuple[list[PointMatch], list[PointMatch], Homography]:
         outliers = []
         inliers = []
 
@@ -89,9 +80,11 @@ class Ransac:
             distance = calculate_distance_between_points(point, point2)
 
             if distance > self.distance_threshold:
-                outliers.append(point)
+                outliers.append(PointMatch(template_point=points[index].template_point,
+                                           image_point=points[index].image_point))
             else:
-                inliers.append(inlier(template_point=points[index].template_point, image_point=points[index].image_point))
+                inliers.append(PointMatch(template_point=points[index].template_point,  
+                                          image_point=points[index].image_point))
 
         return inliers, outliers, homography
 
@@ -103,7 +96,7 @@ class Ransac:
 
         return random.sample(points, self.sample_points_num) # random choice of 4 points
     
-    def refine_homography(self, inliers: list[inlier]) -> Homography:
+    def refine_homography(self, inliers: list[PointMatch]) -> Homography:
         p = np.zeros((3, len(inliers)))
         q = np.zeros((3, len(inliers)))
 
@@ -117,9 +110,27 @@ class Ransac:
             q[2, i] = 1
 
         return self.four_point_algorithm(p, q, len(inliers))
+    
+    def recalc_homography_from_sampled_inliers(self, inliers: list[PointMatch]) -> tuple[Homography, list[PointMatch]]:
+        p = np.zeros((3, 4))
+        q = np.zeros((3, 4))
+
+        sampled_inliers = random.sample(inliers, 4)
+
+        for i, point in enumerate(sampled_inliers):
+            p[0, i] = point.template_point.x
+            p[1, i] = point.template_point.y
+            p[2, i] = 1
+
+            q[0, i] = point.image_point.x
+            q[1, i] = point.image_point.y
+            q[2, i] = 1
+
+        return self.four_point_algorithm(p, q), sampled_inliers
 
 
-    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100) -> tuple[Homography, list[inlier], list[Point]]:
+
+    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100) -> tuple[Homography, list[PointMatch], list[PointMatch], list[PointMatch]]:
         # best_outlier_count = None  # fewer outliers better
         count_inliers = 0
         best_outliers = []
@@ -139,5 +150,10 @@ class Ransac:
 
         if not best_homography:  # if empty arry or best line is none
             raise ValueError("no homography found")
+        
+        # best_homography, sampled_inliers = self.recalc_homography_from_sampled_inliers(best_inliers)
 
-        return self.refine_homography(best_inliers), best_inliers, best_outliers
+        # return best_homography, best_inliers, best_outliers, sampled_inliers
+
+        return self.refine_homography(best_inliers), best_inliers, best_outliers, []
+        # return best_homography, best_inliers, best_outliers

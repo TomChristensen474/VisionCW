@@ -76,9 +76,27 @@ def descriptor_point_match(described_template_keypoints, described_image_keypoin
     
     # sort the best matches based on the lowest ssd
     best_matches.sort(key=lambda x: x.match_ssd)
-    
-    return best_matches
 
+    # TODO REMOVE DUPLICATES
+    unique_matches = []
+    source_points = []
+    destination_points = []
+    for match in best_matches:
+        if match.template_point not in source_points:
+            if match.image_point not in destination_points:
+                unique_matches.append(match)
+                source_points.append(match.template_point)
+                destination_points.append(match.image_point)
+
+    return unique_matches
+
+"""
+points:
+[[x1,y1],
+[x2,y2],
+[x3,y3],
+[x4,y4]]
+"""
 def apply_homography_transform(H: Homography, points: npt.NDArray[np.uint8]) -> list[Point]:
     """
     points_homogeneous
@@ -104,6 +122,9 @@ def apply_homography_transform(H: Homography, points: npt.NDArray[np.uint8]) -> 
     transformed_points = []
 
     for point in points_cartesian_form:
+        # if np.isinf(point[0]) or np.isinf(point[1]):
+        #     point = Point(0, 0) # set to 0,0 if point is infinity 
+        # else:
         point = Point(int(point[0]), int(point[1]))
         transformed_points.append(point)
 
@@ -134,20 +155,19 @@ def run(image, template) -> bool:
     # get the best matches (image and corresponding template keypoint matches)
     # 2. Match keypoints
     best_matches = descriptor_point_match(described_template_keypoints, described_image_keypoints)
-
+    best_match_image = image.copy()
     for best_match in best_matches:
-        cv.drawMarker(image, (int(best_match.image_point.x), int(best_match.image_point.y)), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
-
-    cv.imshow("matches", image)
-    cv.waitKey(0)
+        cv.drawMarker(best_match_image, (int(best_match.image_point.x), int(best_match.image_point.y)), (0, 255, 0), markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+    print(len(best_matches))
+    cv.imshow("matches", best_match_image)
 
     # 3. Threshold to identify matches
     if len(best_matches) < 10:
         return False
 
     # 4. RANSAC to get robust homography
-    rsc = ransac.Ransac(distance_threshold=2)
-    homography, inliers, outliers = rsc.run_ransac(best_matches, iterations=2000)
+    rsc = ransac.Ransac(distance_threshold=1.2)
+    homography, inliers, outliers, sampled_inliers = rsc.run_ransac(best_matches, iterations=2000)
 
     # 5. Apply homography to get bounding box for labelling
 
@@ -160,41 +180,36 @@ def run(image, template) -> bool:
     ])
 
     bbox = apply_homography_transform(homography, template_corners)
-    # print(bbox)
+    print(bbox)
+    img_copy = image.copy()
+    sampled_inliers_img = image.copy()
 
-    # # transform the corners in the template image using the homography
-    # homography_transformed_points = apply_homography_transform(H=H, points=template_corners)
+    draw_outliers_on_image(img_copy, "outliers/inliers", inliers, (0, 255, 0))
+    draw_outliers_on_image(img_copy, "outliers/inliers", outliers, (0, 0, 255))
 
-    # print(homography_transformed_points)
-    
-    # draw_points_on_image(image, inliers, (0, 255, 0))
-    # draw_points_on_image(image, outliers, (0, 0, 255))
-    draw_bbox(image, bbox)
-
-    return True
-    # draw_points_on_image(image, bbox)
-
-    # draw_matches_on_image(image=image, 
-    #                       image_keypoints=image_keypoints,
-    #                       matches=bbox)
-    
-    # draw_matches_on_template(template=template, 
-    #                       template_keypoints=template_keypoints,
-    #                       matches=best_4_matches)
-
-def draw_points_on_image(image, points, color=(0, 255, 0)):
-    for point in points:
-        cv.drawMarker(image, (point.x, point.y), color, markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
-
-    cv.imshow("image", image)
+    draw_outliers_on_image(sampled_inliers_img, "sampled_inliers", sampled_inliers, (255, 0, 255))
+    draw_points_on_image(image, bbox)
     cv.waitKey(0)
     cv.destroyAllWindows()
+
+    return True
+
+def draw_outliers_on_image(image, label, outliers, color=(0, 255, 0)):
+    for outlier in outliers:
+        cv.drawMarker(image, (int(outlier.image_point.x), int(outlier.image_point.y)), color, markerType=cv.MARKER_CROSS, markerSize=10, thickness=1)
+
+    cv.imshow(label, image)
+
+def draw_points_on_image(image, points, color=(255, 0, 0)):
+    for point in points:
+        cv.drawMarker(image, (point.x, point.y), color, markerType=cv.MARKER_CROSS, markerSize=10, thickness=2)
+
+    cv.imshow("image", image)
+
 
 def draw_bbox(image, bbox):
     cv.rectangle(image, (bbox[0].x, bbox[0].y), (bbox[2].x, bbox[2].y), (255, 0, 0), thickness=2)
     cv.imshow("image", image)
-    cv.waitKey(0)
-    cv.destroyAllWindows()
 
 def task3(folderName: str):
     this_file = Path(__file__)
@@ -206,8 +221,8 @@ def task3(folderName: str):
     icon_dataset_path = datasets_folder / "IconDataset" / "png"
 
 
-    template_path = icon_dataset_path / "01-lighthouse.png"
-    image_path = images_path / "test_image_2.png"
+    template_path = icon_dataset_path / "48-hospital.png"
+    image_path = images_path / "test_image_1.png"
 
     # for file in tqdm(natsorted(os.listdir(images_path)), desc="test image"):
     #     # Load test image
