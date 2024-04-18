@@ -81,6 +81,10 @@ class Rectangle:
         assert 0 <= expanded.y1 < expanded.y2 <= max_y
         return expanded
 
+    def overlaps_with(self, other: "Rectangle") -> bool:
+        # use separating axis theorem: https://stackoverflow.com/a/40795835/6087491
+        return not (other.x2 <= self.x1 or self.x2 <= other.x1 or other.y2 <= self.y1 or self.y2 <= other.y1)
+
     def __mul__(self, other: float):
         return Rectangle(
             int(self.x1 * other),
@@ -88,6 +92,9 @@ class Rectangle:
             int(self.x2 * other),
             int(self.y2 * other),
         )
+
+    def __hash__(self) -> int:
+        return hash((self.x1, self.y1, self.x2, self.y2))
 
 
 @dataclass
@@ -135,6 +142,9 @@ class Match:
     difference: float
     bbox: Rectangle | None
 
+    def __hash__(self) -> int:  # to allow use in set()
+        return hash((self.label, self.difference, self.bbox))
+
 
 def task2(folderName: str):
     version = 2
@@ -160,6 +170,12 @@ def task2(folderName: str):
         # replace all white/transparent pixels with black
         # transparent_pixels = np.all(image == [255, 255, 255], axis=-1)
         # image[transparent_pixels] = [0, 0, 0]
+
+        # downscale to 100*100
+        # image = cv.resize(image, (100, 100))
+
+        # gaussian blur
+        # image = cv.GaussianBlur(image, (5, 5), 1)
 
         # Create scaled templates
         # templates = create_scaled_templates(image, 7)
@@ -320,18 +336,28 @@ def find_matching_icons_1(image, icons) -> List[Match]:
 
 
 def render(image: np.ndarray, bbox: Rectangle | None = None, icon: np.ndarray | None = None):
+    images_to_show = [image]
+
     if bbox is not None:
-        image = image.copy()
-        cv.rectangle(image, (bbox.x1, bbox.y1), (bbox.x2, bbox.y2), (200, 0, 0), 2)
+        image_with_bbox = image.copy()
+        cv.rectangle(image_with_bbox, (bbox.x1, bbox.y1), (bbox.x2, bbox.y2), (200, 0, 0), 2)
+        images_to_show[0] = image_with_bbox
+
+        search_area = image[bbox.y1 : bbox.y2, bbox.x1 : bbox.x2]
+        scaled_search_area = cv.resize(
+            search_area, (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST
+        )
+        images_to_show.append(scaled_search_area)
 
     if icon is not None:
         # rescale icon to same size as image
         scaled_icon = cv.resize(icon, (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST)
-        # hstack the image and the icon
-        both_images = np.hstack((image, scaled_icon))
-        image = both_images
+        images_to_show.append(scaled_icon)
 
-    cv.imshow("image", image)
+    # hstack the images
+    all_images = np.hstack(images_to_show)
+
+    cv.imshow("image", all_images)
     cv.waitKey(1)
 
 
@@ -348,22 +374,22 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
     ]
 
     # for every icon
-    for label, pyramid in tqdm(icons, desc="icon"):
+    # for label, pyramid in tqdm(icons, desc="icon"):
+    for icon_label, icon_pyramid in icons:
         # render(pyramid.image)
-        correct_matches = [
-            "37-post-office",
-            "06-church",
-            "45-museum",
-            "35-police",
-            "50-cemetery",
-        ]
-        will_match = label.split(".")[0] in correct_matches
-        if not will_match:
-            continue
+        # correct_matches = [
+        #     "37-post-office",
+        #     "06-church",
+        #     "45-museum",
+        #     "35-police",
+        #     "50-cemetery",
+        # ]
+        # will_match = label.split(".")[0] in correct_matches
+        # if not will_match:
+        #     continue
         # print(label)
         # if label != "02-bike":
         # continue
-    for icon_label, icon_pyramid in icons:
 
         # the bounding box of the search space i.e. where the icon was on the previous level
         # (between pyramid levels, will need to be x2 for next level)
@@ -464,7 +490,7 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
             layer_bbox = RatioRectangle.from_bbox(best_scale_factor_bbox, img_dimensions)
 
         if layer_bbox is None:
-            continue # this icon is not even close
+            continue  # this icon is not even close
 
         if previous_layer_scale_factor_level != 0:
             # we matched on lower levels, but we stopped matching before reaching the highest level
@@ -475,11 +501,44 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
         matches.append(match)
 
         print(repr(match))
-        render(image, bbox)
+        # render(image, bbox, icon_pyramid.image)
+
+    # detect nested bounding boxes, and only keep the largest one
+    matches_to_remove = set()
+    for match1 in matches:
+        for match2 in matches:
+            if match1 == match2:
+                continue
+
+            assert match1.bbox is not None
+            assert match2.bbox is not None
+            if match1.bbox.overlaps_with(match2.bbox):
+                bbox1_sides = (match1.bbox.x2 - match1.bbox.x1) + (match1.bbox.y2 - match1.bbox.y1)
+                bbox2_sides = (match2.bbox.x2 - match2.bbox.x1) + (match2.bbox.y2 - match2.bbox.y1)
+
+                match_to_remove = match2 if bbox1_sides > bbox2_sides else match1
+                matches_to_remove.add(match_to_remove)
+
+    matches = [match for match in matches if match not in matches_to_remove]
+
+    # render all the matches
+    img_result = image.copy()
+    for match in matches:
+        assert match.bbox is not None
+        cv.rectangle(
+            img_result,
+            (match.bbox.x1, match.bbox.y1),
+            (match.bbox.x2, match.bbox.y2),
+            (255, 0, 0),
+            2,
+        )
+
+    cv.imshow("all bboxes", img_result)
+    cv.waitKey(1)
 
     matches.sort(key=lambda x: x.difference)
-    return matches[:5]
-    # return matches
+    # return matches[:5]
+    return matches
 
 
 def find_matching_icons(image, icons, version) -> list[Match]:
@@ -520,7 +579,7 @@ def match_template(image: Image, template: Image):
 
             if DEBUG_LEVEL >= 2:
                 bbox = Rectangle(x, y, x + template_width, y + template_height)
-                render(image, bbox)
+                render(image, bbox, icon=template)
 
             result[x, y] = calculate_patch_similarity(
                 patch1,
@@ -603,6 +662,11 @@ def downsample(image, scale_factor=0.5):
 def calculate_patch_similarity(
     patch1, patch2, ssd_match: bool = True, cross_corr_match: bool = False
 ) -> float:
+    def imshow(image, name: str):
+        image = cv.resize(image, (512, 512), interpolation=cv.INTER_NEAREST)
+        cv.imshow(name, image)
+        cv.waitKey(0)
+
     def ssd_normalized(patch1, patch2):
         diff = (patch1 - patch2).astype(np.int32) ** 2
         return diff
@@ -622,7 +686,9 @@ def calculate_patch_similarity(
         diff = ((patch1 - patch1.mean()) / patch1.std()) * ((patch2 - patch2.mean()) / patch2.std())
 
         if DEBUG_LEVEL >= 2:
-            imshow(diff, "diff")
+            # norm_diff = 1. - (diff + 1.) / 2. * 255.
+            # imshow(norm_diff, "diff")
+            pass
 
         diff = np.sum(diff) / patch1.size
 
@@ -644,12 +710,6 @@ def calculate_patch_similarity(
         match_score = cross_corr_normalized(patch1, patch2)
     else:
         raise ValueError("Choose correlation matching or ssd matching!")
-
-    def imshow(image, name: str):
-        pass
-        image = cv.resize(image, (512, 512), interpolation=cv.INTER_NEAREST)
-        cv.imshow(name, image)
-        cv.waitKey(0)
 
     assert 0 <= match_score <= 1
 
