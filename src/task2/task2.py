@@ -1,5 +1,6 @@
-import dataclasses
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
+from joblib import Parallel, delayed
 from natsort import natsorted
 from pathlib import Path
 from scipy import ndimage
@@ -26,11 +27,8 @@ def print(s=""):
 
 @dataclass
 class Icon:
-    top: int
-    left: int
-    bottom: int
-    right: int
     label: str
+    bbox: "Rectangle"
 
 
 @dataclass
@@ -85,6 +83,27 @@ class Rectangle:
         # use separating axis theorem: https://stackoverflow.com/a/40795835/6087491
         return not (other.x2 <= self.x1 or self.x2 <= other.x1 or other.y2 <= self.y1 or self.y2 <= other.y1)
 
+    def area(self) -> int:
+        return (self.x2 - self.x1) * (self.y2 - self.y1)
+
+    def intersection(self, other: "Rectangle") -> "Rectangle | None":
+        if not self.overlaps_with(other):
+            return None
+
+        return Rectangle(
+            max(self.x1, other.x1),
+            max(self.y1, other.y1),
+            min(self.x2, other.x2),
+            min(self.y2, other.y2),
+        )
+
+    def intersection_area(self, other: "Rectangle") -> int:
+        intersection = self.intersection(other)
+        return intersection.area() if intersection else 0
+
+    def union_area(self, other: "Rectangle") -> int:
+        return self.area() + other.area() - self.intersection_area(other)
+
     def __mul__(self, other: float):
         return Rectangle(
             int(self.x1 * other),
@@ -99,7 +118,7 @@ class Rectangle:
 
 @dataclass
 class RatioRectangle:
-    # to preserve bounding boxes for different
+    # to preserve bounding boxes between pyramid levels
     # all between 0 and 1
     x1: float
     y1: float
@@ -140,26 +159,37 @@ class RatioRectangle:
 class Match:
     label: str
     difference: float
-    bbox: Rectangle | None
+    bbox: Rectangle
+    icon_image: Image = field(repr=False)
 
     def __hash__(self) -> int:  # to allow use in set()
         return hash((self.label, self.difference, self.bbox))
 
 
-def task2(folderName: str):
-    version = 2
+def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, float, float]:
+    # returns (Acc,TPR,FPR,FNR)
+    version = 3
 
     this_file = Path(__file__)
     datasets_folder = this_file.parent.parent.parent / "datasets"
-    dataset_folder = datasets_folder / folderName
+    dataset_folder = datasets_folder / test_folder_name
 
     images_path = dataset_folder / "images"
     annotations_path = dataset_folder / "annotations"
-    icon_dataset_path = datasets_folder / "IconDataset" / "png"
+    icon_dataset_path = datasets_folder / icon_folder_name / "png"
     # test_images = []
 
     # Load test results
     # for file in natsorted(os.listdir(annotations_path)):
+
+    totals = {
+        "positives": 0,
+        "negatives": 0,
+        "true_positives": 0,
+        "true_negatives": 0,
+        "false_positives": 0,
+        "false_negatives": 0,
+    }
 
     # Preprocess templates for matching
     icons: list[tuple[str, GaussianPyramid]] = []
@@ -167,18 +197,7 @@ def task2(folderName: str):
         image_path = icon_dataset_path / file
         image = cv.imread(str(image_path))
 
-        # replace all white/transparent pixels with black
-        # transparent_pixels = np.all(image == [255, 255, 255], axis=-1)
-        # image[transparent_pixels] = [0, 0, 0]
-
-        # downscale to 100*100
-        # image = cv.resize(image, (100, 100))
-
-        # gaussian blur
-        # image = cv.GaussianBlur(image, (5, 5), 1)
-
         # Create scaled templates
-        # templates = create_scaled_templates(image, 7)
         pyramid = GaussianPyramid(image)
 
         # Create rotated templates
@@ -195,48 +214,97 @@ def task2(folderName: str):
         image = cv.imread(str(images_path / file))
 
         matches = find_matching_icons(image, icons, version)
-        # found_matches.append(matches)
 
-        icons_in_image = {}
+        icons_in_image: dict[str, Icon] = {}
         csv_file = (annotations_path / file).with_suffix(".csv")
         annotations = pd.read_csv(csv_file)
 
-        for label, top, left, bottom, right in annotations.values:
-            icons_in_image[label] = Icon(top, left, bottom, right, label)
+        for label, left, top, right, bottom in annotations.values:
+            bbox = Rectangle(left, top, right, bottom)
+            icons_in_image[label] = Icon(label, bbox)
 
-        print()
-        print(f"Test image: {file}")
-        print(f"Found matches:")
-        for match in matches:
-            correct_match = "YES:" if match.label in icons_in_image else "NO: "
-            print(f"\t{correct_match} {match}")
+        print(f"\nTest image: {file}")
 
-        correct_icons_string = "\n\t".join([str(icon) for icon in icons_in_image.values()])
-        print(f"Icons in image:\n\t{correct_icons_string}")
+        # calculate all the metrics
 
-        labels_in_image = [icon.label for icon in icons_in_image.values()]
-        correct_matches = [match.label for match in matches if match.label in labels_in_image]
-        accuracy = len(correct_matches) / len(labels_in_image)
-        print(f"Accuracy: {accuracy * 100}%")
+        all_labels = set(label for (label, _) in icons)
+        matched_labels = set(match.label for match in matches)
 
-        # break  # tmp: stop after 1st image
+        positives = set(icon.label for icon in icons_in_image.values())  # labels in image
+        negatives = all_labels - positives  # labels not in image
 
-    # accuracies = []
-    # for i, image in enumerate(test_images):
-    # actual_icons = [icon.label for icon in image.icons]
-    # found_matches_labels = [match.label for match in found_matches[i]]
-    # accuracy = len(set(actual_icons) & set(found_matches_labels)) / len(actual_icons)
-    # accuracies.append(accuracy)
-    # print(f"Test image: {image.name}" + ", Accuracy: " + str(accuracy * 100) + "%")
-    # print(f"Actual icons: {actual_icons}")
-    # print(f"Found matches: {found_matches_labels}")
+        true_positives = matched_labels & positives
+        false_positives = matched_labels - positives
+        false_negatives = positives - matched_labels
+        true_negatives = all_labels - matched_labels - positives
 
-    # print()
-    # print(f"Average accuracy: {np.average(accuracies) * 100}%")
+        totals["positives"] += len(positives)
+        totals["negatives"] += len(negatives)
+        totals["true_positives"] += len(true_positives)
+        totals["true_negatives"] += len(true_negatives)
+        totals["false_positives"] += len(false_positives)
+        totals["false_negatives"] += len(false_negatives)
+
+        tpr = len(true_positives) / len(positives)  # i.e. recall
+        fpr = len(false_positives) / len(negatives)
+        fnr = len(false_negatives) / len(positives)
+        accuracy = (len(true_positives) + len(true_negatives)) / len(all_labels)
+
+        # calculate intersection over union (IoU)
+        ious = {}
+        for icon in icons_in_image.values():
+            # get the corresponding match
+            match = next((m for m in matches if m.label == icon.label), None)
+            if match is None:
+                ious[icon.label] = 0
+                continue
+
+            correct_bbox = icon.bbox
+            predicted_bbox = match.bbox
+
+            intersection = correct_bbox.intersection_area(predicted_bbox)
+            union = correct_bbox.union_area(predicted_bbox)
+
+            iou = intersection / union
+            ious[icon.label] = iou
+
+        iou = sum(ious.values()) / len(ious)
+
+        print(
+            f"Accuracy: {accuracy * 100:.3}% TPR: {tpr * 100:.3}% FPR: {fpr * 100:.3}% FNR: {fnr * 100:.3}% Average IoU: {iou * 100:.3}%"
+        )
+
+        print("True positives: (correct matches)")
+        for label in true_positives:
+            print(f"\t{label:<10} IoU: {ious[label]:.3f}")
+
+        print("False positives:")
+        for label in false_positives:
+            print(f"\t{label:<10}")
+
+        print("False negatives: (missed matches)")
+        for label in false_negatives:
+            print(f"\t{label:<10}")
+
+        print("\n")
+
+    total_accuracy = (totals["true_positives"] + totals["true_negatives"]) / (
+        totals["positives"] + totals["negatives"]
+    )
+    total_tpr = totals["true_positives"] / totals["positives"]
+    total_fpr = totals["false_positives"] / totals["negatives"]
+    total_fnr = totals["false_negatives"] / totals["positives"]
+
+    print("\n Total final stats:")
+    print(str(totals))
+    print(
+        f"Accuracy: {total_accuracy * 100:.3}% TPR: {total_tpr * 100:.3}% FPR: {total_fpr * 100:.3}% FNR: {total_fnr * 100:.3}%"
+    )
+
+    return (total_accuracy, total_tpr, total_fpr, total_fnr)
 
 
-def find_matching_icons_3a(image, icons) -> List[Match]:
-    # image = cv.resize(image, (512, 512), interpolation=cv.INTER_LINEAR)
+def find_matching_icons_3a(image: Image, icons: list[tuple[str, GaussianPyramid]]) -> List[Match]:
 
     # Get bounding boxes
     grayscale_image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
@@ -249,16 +317,13 @@ def find_matching_icons_3a(image, icons) -> List[Match]:
         best_template = ""
         bbox_match = None
         bounding_box = image[y : y + h, x : x + w]
-        cv.rectangle(image, (x, y), (x + w, y + h), (200, 0, 0), 2)
 
-        if w < h:
-            scale_factor = h / icon_size
-        else:
-            scale_factor = w / icon_size
+        scale_factor = max(w, h) / icon_size
 
         # slide icon over image
-        for label, templates in icons:
-            for template in templates:
+        for label, pyramid in icons:
+            for pyramid_level in pyramid:
+                template = pyramid_level.image
                 resized_template = cv.resize(
                     template,
                     (int(icon_size * scale_factor), int(icon_size * scale_factor)),
@@ -274,7 +339,7 @@ def find_matching_icons_3a(image, icons) -> List[Match]:
                     pad_width = resized_template.shape[1] - bounding_box.shape[1]
                     padded_bounding_box = np.pad(
                         bounding_box,
-                        ((0, pad_height), (0, pad_width), (0, 0)),
+                        ((pad_height // 2, pad_height // 2), (pad_width // 2, pad_width // 2), (0, 0)),
                         mode="constant",
                     )
 
@@ -282,114 +347,113 @@ def find_matching_icons_3a(image, icons) -> List[Match]:
 
                 corr_matrix = match_template(bounding_box, resized_template)
 
-                if corr_matrix is not None:
-                    if corr_matrix.min() < min_difference:
-                        min_difference = corr_matrix.min()
-                        best_template = label
-                        bbox = Rectangle(x, y, x + w, y + h)
+                if corr_matrix is not None and corr_matrix.min() < min_difference:
+                    min_difference = corr_matrix.min()
+                    best_template = label
+                    bbox_match = Rectangle(x, y, x + w, y + h)
 
-        cv.putText(
-            image,
-            best_template,
-            (x, y),
-            cv.FONT_HERSHEY_PLAIN,
-            1,
-            (0, 0, 255),
-            2,
-            cv.LINE_AA,
-        )
-        # print(best_template)
-        matches.append(Match(Path(best_template).stem, min_difference, bbox_match))
-    # cv.imshow("image", image)
-    # cv.waitKey(0)
+        assert bbox_match is not None
+        label = Path(best_template).stem
+        icon_image = next(pyramid.image for (_label, pyramid) in icons if label == _label)
+        match = Match(label, min_difference, bbox_match, icon_image)
+        matches.append(match)
 
+    matches = filter_nested_matches(matches)
+
+    render(image, matches, wait=False)
     return matches
 
 
-def find_matching_icons_1(image, icons) -> List[Match]:
-    image = cv.resize(image, (64, 64), interpolation=cv.INTER_LINEAR)
-    matches = []
+def render(
+    img: Image,
+    matches: List[Match] = [],
+    window_name="image",
+    wait=False,  # wait for keypress
+):
+    image = img.copy()
+    icons = []
+    search_areas = []
 
-    for label, templates in icons:
-        min_difference = math.inf
-        best_template = ""
-        bbox_match = None
-        for template in templates:
-            corr_matrix = match_template(image, template)
+    # draw labelled bounding boxes on image
+    for match in matches:
+        # draw bbox
+        bbox = match.bbox
+        assert bbox is not None
+        cv.rectangle(image, (bbox.x1, bbox.y1), (bbox.x2, bbox.y2), (200, 0, 0), 2)
 
-            if corr_matrix is not None:
-                if corr_matrix.min() < min_difference:
-                    min_difference = corr_matrix.min()
-                    best_template = label
-                    x1 = corr_matrix.argmin(axis=0)[0]
-                    x2 = corr_matrix.argmin(axis=1)[0]
-                    bbox_match = Rectangle(x1, x2, x1 + template.shape[0], x2 + template.shape[1])
-        matches.append(Match(Path(label).stem, min_difference, bbox_match))
-
-    matches = sorted(matches, key=lambda x: x.min_difference)
-    # print()
-    # print(filter_matches(matches, 100))
-    # cv.imshow("item", image)
-    # cv.waitKey(0)
-
-    return filter_matches(matches, 0.05)
-
-
-def render(image: np.ndarray, bbox: Rectangle | None = None, icon: np.ndarray | None = None):
-    images_to_show = [image]
-
-    if bbox is not None:
-        image_with_bbox = image.copy()
-        cv.rectangle(image_with_bbox, (bbox.x1, bbox.y1), (bbox.x2, bbox.y2), (200, 0, 0), 2)
-        images_to_show[0] = image_with_bbox
-
-        search_area = image[bbox.y1 : bbox.y2, bbox.x1 : bbox.x2]
-        scaled_search_area = cv.resize(
-            search_area, (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST
+        # draw label text
+        label_text = f"{match.label} {match.difference:.3f}"
+        cv.putText(
+            image,
+            label_text,
+            (bbox.x1, bbox.y2 + 10),
+            cv.FONT_HERSHEY_PLAIN,
+            1,
+            (0, 0, 255),
+            # 2,
+            # cv.LINE_AA,
         )
-        images_to_show.append(scaled_search_area)
 
-    if icon is not None:
-        # rescale icon to same size as image
-        scaled_icon = cv.resize(icon, (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST)
-        images_to_show.append(scaled_icon)
+        # add icon
+        icons.append(match.icon_image)
 
-    # hstack the images
-    all_images = np.hstack(images_to_show)
+        # add search area
+        search_area = img[bbox.y1 : bbox.y2, bbox.x1 : bbox.x2]
+        search_areas.append(search_area)
 
-    cv.imshow("image", all_images)
-    cv.waitKey(1)
+    assert len(icons) == len(search_areas) == len(matches)
+
+    if len(matches) > 1:
+        # multi-match layout
+        # image is on the left, at its resolution of 512x512.
+        # icons and search areas are scaled to 1/2 its side length, one above the other
+        # and are placed to the right of the image
+
+        match_width = int(image.shape[1] / 2)
+        match_height = int(image.shape[0] / 2)
+
+        icons = [
+            cv.resize(icon, (match_width, match_height), interpolation=cv.INTER_NEAREST) for icon in icons
+        ]
+        icons = np.hstack(icons)
+
+        search_areas = [
+            cv.resize(search_area, (match_width, match_height), interpolation=cv.INTER_NEAREST)
+            for search_area in search_areas
+        ]
+        search_areas = np.hstack(search_areas)
+
+        everything_except_image = np.vstack((icons, search_areas))
+        image = np.hstack((image, everything_except_image))
+
+    elif len(matches) == 1:
+        # single match layout
+        # just resize and hstack the image, search area and icon
+
+        icon = cv.resize(icons[0], (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST)
+        search_area = cv.resize(
+            search_areas[0], (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST
+        )
+
+        image = np.hstack((image, search_area, icon))
+
+    cv.imshow(window_name, image)
+    cv.waitKey(0 if wait else 1)
 
 
 def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> list[Match]:
-    # render(image)
-    image_pyramid = GaussianPyramid(image)
-    matches: list[Match] = []
+    @delayed
+    def get_label_icon_match(image, icon_label_and_pyramid) -> Match | None:
+        icon_label, icon_pyramid = icon_label_and_pyramid
+        image_pyramid = GaussianPyramid(image)
 
-    scale_factor_multipliers_per_level = [
-        [1.0],
-        np.linspace(0.95, 1.05, 3).tolist(),
-        np.linspace(0.8, 1.2, 5).tolist(),
-        np.linspace(0.1, 0.9, 8).tolist(),
-    ]
-
-    # for every icon
-    # for label, pyramid in tqdm(icons, desc="icon"):
-    for icon_label, icon_pyramid in icons:
-        # render(pyramid.image)
-        # correct_matches = [
-        #     "37-post-office",
-        #     "06-church",
-        #     "45-museum",
-        #     "35-police",
-        #     "50-cemetery",
-        # ]
-        # will_match = label.split(".")[0] in correct_matches
-        # if not will_match:
-        #     continue
-        # print(label)
-        # if label != "02-bike":
-        # continue
+        scale_factor_multipliers_per_level = [
+            [1.0],
+            np.linspace(0.95, 1.05, 3).tolist(),
+            np.linspace(0.8, 1.2, 5).tolist(),
+            np.linspace(0.1, 0.9, 8).tolist(),
+        ]
+        thresholds_per_level = [0.15, 0.2, 0.3, 0.4]
 
         # the bounding box of the search space i.e. where the icon was on the previous level
         # (between pyramid levels, will need to be x2 for next level)
@@ -452,7 +516,8 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
 
                 x_min, y_min = np.unravel_index(corr_matrix.argmin(), corr_matrix.shape)
                 min_difference = corr_matrix[x_min, y_min]
-                if min_difference > 0.15:  # <- tunable hyperparameter
+                threshold = thresholds_per_level[level_number]
+                if min_difference > threshold:  # <- tunable hyperparameter
                     continue  # no match
 
                 if min_difference > best_scale_factor_score:
@@ -476,7 +541,8 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
 
                 if DEBUG_LEVEL >= 1:
                     # render image with bounding box
-                    render(scaled_image, best_scale_factor_bbox, icon=scaled_template)
+                    match = Match(icon_label, min_difference, best_scale_factor_bbox, scaled_template)
+                    render(scaled_image, [match])
 
             if best_scale_factor_score == np.inf:
                 # all scales were skipped due to not being similar enough
@@ -490,23 +556,51 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
             layer_bbox = RatioRectangle.from_bbox(best_scale_factor_bbox, img_dimensions)
 
         if layer_bbox is None:
-            continue  # this icon is not even close
+            return None  # this icon is not even close
 
         if previous_layer_scale_factor_level != 0:
             # we matched on lower levels, but we stopped matching before reaching the highest level
-            continue
+            return None
 
         bbox = layer_bbox.to_absolute((image.shape[1], image.shape[0]), 0)
-        match = Match(Path(icon_label).stem, min_difference, bbox)
-        matches.append(match)
+        match = Match(Path(icon_label).stem, min_difference, bbox, icon_pyramid.image)
 
-        print(repr(match))
-        # render(image, bbox, icon_pyramid.image)
+        return match
 
+    matches_generator = Parallel(n_jobs=-1, return_as="generator")(
+        get_label_icon_match(image, icon_label_and_pyramid) for icon_label_and_pyramid in icons
+    )
+    matches_generator = tqdm(matches_generator, total=len(icons), desc="Icons")
+    matches = [match for match in matches_generator if match is not None]
+
+    matches = filter_nested_matches(matches)
+
+    # render all the matches
+    render(image, matches, window_name="all matches")
+
+    matches.sort(key=lambda x: x.difference)
+    return matches
+
+
+def find_matching_icons(image: Image, icons: list[tuple[str, GaussianPyramid]], version: int) -> list[Match]:
+    match version:
+        case 2:
+            return find_matching_icons_2(image, icons)
+        case 3:
+            return find_matching_icons_3a(image, icons)
+        case _:
+            raise ValueError("Invalid version number")
+
+
+def filter_matches(matches: List[Match], threshold: float) -> List[Match]:
+    return [match for match in matches if match.difference < threshold]
+
+
+def filter_nested_matches(filtered_matches: list[Match]) -> list[Match]:
     # detect nested bounding boxes, and only keep the largest one
     matches_to_remove = set()
-    for match1 in matches:
-        for match2 in matches:
+    for match1 in filtered_matches:
+        for match2 in filtered_matches:
             if match1 == match2:
                 continue
 
@@ -519,42 +613,8 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 match_to_remove = match2 if bbox1_sides > bbox2_sides else match1
                 matches_to_remove.add(match_to_remove)
 
-    matches = [match for match in matches if match not in matches_to_remove]
-
-    # render all the matches
-    img_result = image.copy()
-    for match in matches:
-        assert match.bbox is not None
-        cv.rectangle(
-            img_result,
-            (match.bbox.x1, match.bbox.y1),
-            (match.bbox.x2, match.bbox.y2),
-            (255, 0, 0),
-            2,
-        )
-
-    cv.imshow("all bboxes", img_result)
-    cv.waitKey(1)
-
-    matches.sort(key=lambda x: x.difference)
-    # return matches[:5]
-    return matches
-
-
-def find_matching_icons(image, icons, version) -> list[Match]:
-    match version:
-        case 1:
-            return find_matching_icons_1(image, icons)
-        case 2:
-            return find_matching_icons_2(image, icons)
-        case 3:
-            return find_matching_icons_3a(image, icons)
-        case _:
-            raise ValueError("Invalid version number")
-
-
-def filter_matches(matches: List[Match], threshold: float) -> List[Match]:
-    return [match for match in matches if match.difference < threshold]
+    filtered_matches = [match for match in filtered_matches if match not in matches_to_remove]
+    return filtered_matches
 
 
 def match_template(image: Image, template: Image):
@@ -569,17 +629,17 @@ def match_template(image: Image, template: Image):
     result = np.ones((image_height - template_height + 1, image_width - template_width + 1))
 
     # iterate through the image and calculate the correlation
-    # for y in tqdm(range(image_height - template_height + 1), desc="match_template y"):
     for y in range(image_height - template_height + 1):
         for x in range(image_width - template_width + 1):
 
             patch1 = image[y : y + template_height, x : x + template_width]
-            if (patch1 == 255).all():
+            if (patch1 == 255).all() or (patch1 == 0).all():
                 continue
 
             if DEBUG_LEVEL >= 2:
                 bbox = Rectangle(x, y, x + template_width, y + template_height)
-                render(image, bbox, icon=template)
+                match = Match("", 0, bbox, template)
+                render(image, [match])
 
             result[x, y] = calculate_patch_similarity(
                 patch1,
@@ -603,10 +663,20 @@ def get_bounding_boxes(grayscale_image):
     bounding_boxes = []
     for contour in contours:
         x, y, w, h = cv.boundingRect(contour)
+
         if w > h:
-            bounding_boxes.append((x, y, w, w))
-        else:
-            bounding_boxes.append((x, y, h, h))
+            padding = w - h
+            y -= padding // 2
+            y = max(0, y)
+            h = w
+        elif w < h:
+            padding = h - w
+            x -= padding // 2
+            x = max(0, x)
+            w = h
+
+        bbox = (x, y, w, h)
+        bounding_boxes.append(bbox)
 
     bounding_boxes = filter_bboxes_within(bounding_boxes)
     return bounding_boxes
@@ -677,28 +747,31 @@ def calculate_patch_similarity(
         patch2 = patch2.astype(np.float32)
 
         # normalize
+        def normalise_patch(patch):
+            patch -= patch.min()
+            patch *= 255 / patch.max()
+            return patch
 
-        patch1 -= patch1.min()
-        patch1 *= 255 / patch1.max()
-        patch2 -= patch2.min()
-        patch2 *= 255 / patch2.max()
+        patch1_norm = normalise_patch(patch1)
+        patch2_norm = normalise_patch(patch2)
 
-        diff = ((patch1 - patch1.mean()) / patch1.std()) * ((patch2 - patch2.mean()) / patch2.std())
+        patch1_hat = (patch1_norm - patch1_norm.mean()) / patch1_norm.std()
+        patch2_hat = (patch2_norm - patch2_norm.mean()) / patch2_norm.std()
+
+        diff = patch1_hat * patch2_hat
 
         if DEBUG_LEVEL >= 2:
             # norm_diff = 1. - (diff + 1.) / 2. * 255.
             # imshow(norm_diff, "diff")
             pass
 
-        diff = np.sum(diff) / patch1.size
+        mean_diff = diff.mean() # [-1, 1]
+        assert not np.isnan(mean_diff)
 
-        # [-1, 1] -> [0, 1]
-        diff = (diff + 1.0) / 2.0
+        mean_diff = (mean_diff + 1.) / 2. # [0, 1]
+        mean_diff = 1.0 - mean_diff # [1, 0] because 0 is "no difference"
 
-        # flipping 0<x<1 to 1<x<0 because 0 is "no difference"
-        diff = 1.0 - diff
-
-        return diff
+        return mean_diff
 
     if ssd_match == cross_corr_match:
         raise ValueError("Choose correlation matching or ssd matching!")
@@ -725,4 +798,4 @@ def calculate_patch_similarity(
 
 
 if __name__ == "__main__":
-    task2("Task2Dataset")
+    task2("IconDataset", "Task2Dataset")

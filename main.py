@@ -14,7 +14,7 @@ def testTask1(folderName):
     
     # return(totalError)
     
-    from task1 import task1
+    from src.task1.task1 import task1
     return task1(folderName)
 
 def testTask2(iconDir, testDir):
@@ -23,7 +23,10 @@ def testTask2(iconDir, testDir):
     # For each predicted class, check accuracy with the annotations
     # Check and calculate the Intersection Over Union (IoU) score
     # based on the IoU determine accuracy, TruePositives, FalsePositives, FalseNegatives
-    return (Acc,TPR,FPR,FNR)
+    # return (Acc,TPR,FPR,FNR)
+
+    from src.task2.task2 import task2
+    return task2(iconDir, testDir)
 
 
 def testTask3(iconFolderName, testFolderName):
