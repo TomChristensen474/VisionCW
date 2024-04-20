@@ -134,6 +134,7 @@ class Ransac:
         # best_outlier_count = None  # fewer outliers better
         maxRatio = 0.8
         best_inlier_ratio = 0
+        best_inlier_count = 0
         best_outliers = []
         best_inliers = []
         best_homography = None
@@ -141,21 +142,29 @@ class Ransac:
         for i in range(iterations):
             # sampled_points = self.sample_points(points)
             inliers, outliers, homography = self.calculate_homography_outliers(points)
-            inlier_ratio = len(inliers) / len(points)
+            # inlier_ratio = len(inliers) / len(points)
+            inlier_count = len(inliers)
 
-            if inlier_ratio > best_inlier_ratio and inlier_ratio >= (1 - maxRatio) and np.random.uniform(0,1) > 0.8:
-                best_inlier_ratio = inlier_ratio
+            if inlier_count > best_inlier_count:
+                best_inlier_count = inlier_count
                 best_inliers = inliers
                 best_outliers = outliers
                 best_homography = homography
+
+
+            # if inlier_ratio > best_inlier_ratio and inlier_ratio >= (1 - maxRatio) and np.random.uniform(0,1) > 0.8:
+            #     best_inlier_ratio = inlier_ratio
+            #     best_inliers = inliers
+            #     best_outliers = outliers
+            #     best_homography = homography
         
 
         if not best_homography:  # if empty arry or best line is none
             raise ValueError("no homography found")
         
-        best_homography, sampled_inliers = self.recalc_homography_from_sampled_inliers(best_inliers)
+        # best_homography, sampled_inliers = self.recalc_homography_from_sampled_inliers(best_inliers)
 
-        return best_homography, best_inliers, best_outliers, sampled_inliers
+        # return best_homography, best_inliers, best_outliers, sampled_inliers
 
-        # return self.refine_homography(best_inliers), best_inliers, best_outliers, []
-        # return best_homography, best_inliers, best_outliers
+        return self.refine_homography(best_inliers), best_inliers, best_outliers, []
+        # return best_homography, best_inliers, best_outliers, []

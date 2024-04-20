@@ -64,7 +64,7 @@ best matching points which are sorted based on lowest difference metric (e.g. lo
 
 
 def descriptor_point_match(described_template_keypoints, described_image_keypoints):
-    ssd_threshold = 30000
+    ssd_threshold = 15000
     r_value = 0.8
     matches: list[TemplateImageKeypointMatch] = []
     # for each template keypoint
@@ -104,7 +104,7 @@ def descriptor_point_match(described_template_keypoints, described_image_keypoin
     # sort the best matches based on the lowest ssd
     matches.sort(key=lambda x: x.match_ssd)
 
-    return matches
+    # return matches
 
     unique_matches = []
     source_points = []
@@ -167,7 +167,7 @@ def run(image, template) -> tuple[bool, int, list[int]]:
     image_gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
 
     # 1. SIFT
-    sift = cv.SIFT_create()  # ignore "known member" error
+    sift = cv.SIFT_create(nOctaveLayers=3)  # ignore "known member" error
     template_keypoints, template_descriptors = sift.detectAndCompute(template_gray, None)
     image_keypoints, image_descriptors = sift.detectAndCompute(image_gray, None)
 
@@ -207,7 +207,7 @@ def run(image, template) -> tuple[bool, int, list[int]]:
     cv.imshow("matches", match_image)
 
     # 4. RANSAC to get robust homography
-    rsc = ransac.Ransac(distance_threshold=2)
+    rsc = ransac.Ransac(distance_threshold=7)
     homography, inliers, outliers, sampled_inliers = rsc.run_ransac(matches, iterations=20000)
 
     # # 5. Threshold to identify matches within inliers -> a decent estimate for matching
@@ -236,8 +236,6 @@ def run(image, template) -> tuple[bool, int, list[int]]:
     draw_outliers_on_image(sampled_inliers_img, "sampled_inliers", sampled_inliers, (255, 0, 255))
     draw_points_on_image(image, bbox)
 
-    cv.waitKey(0) # uncomment to show images
-
     formatted_bbox_axes = [
         min(bbox[0].x, bbox[1].x, bbox[2].x, bbox[3].x),  # top
         min(bbox[0].y, bbox[1].y, bbox[2].y, bbox[3].y),  # left
@@ -246,8 +244,8 @@ def run(image, template) -> tuple[bool, int, list[int]]:
     ]
 
     draw_axis_bbox(image, formatted_bbox_axes, (255, 0, 0))
-    cv.waitKey(0) # uncomment to show images
-    cv.destroyAllWindows()
+    cv.waitKey(4000) # uncomment to show images
+    # cv.destroyAllWindows()
 
     return True, len(matches), formatted_bbox_axes
 
@@ -312,7 +310,7 @@ def task3(folderName: str):
     icon_dataset_path = datasets_folder / "IconDataset" / "png"
 
     # for testing purposes
-    template_path = icon_dataset_path / "36-hotel.png"
+    template_path = icon_dataset_path / "15-barn.png"
     image_path = images_path / "test_image_1.png"
     template = cv.imread(str(template_path))
     image = cv.imread(str(image_path))
@@ -320,79 +318,81 @@ def task3(folderName: str):
 
     total_accuracy = 0
 
-    # for file in tqdm(natsorted(os.listdir(images_path)), desc="test image"):
-    #     # Load test image
-    #     image = cv.imread(str(images_path / file))
+    for file in tqdm(natsorted(os.listdir(images_path)), desc="test image"):
+        # Load test image
+        image = cv.imread(str(images_path / file))
 
-    #     # Load annotations data
-    #     icons_in_image = {}
-    #     csv_file = (annotations_path / file).with_suffix(".csv")
-    #     annotations = pd.read_csv(csv_file)
+        # Load annotations data
+        icons_in_image = {}
+        csv_file = (annotations_path / file).with_suffix(".csv")
+        annotations = pd.read_csv(csv_file)
 
-    #     for label, top, left, bottom, right in annotations.values:
-    #         icons_in_image[label] = Icon(top, left, bottom, right, label)
+        for label, top, left, bottom, right in annotations.values:
+            icons_in_image[label] = Icon(top, left, bottom, right, label)
 
-    #     total_accuracy, total_tpr, total_fpr = 0, 0, 0
-    #     TP, TN, FP, FN = 0, 0, 0, 0
+        total_accuracy, total_tpr, total_fpr = 0, 0, 0
+        TP, TN, FP, FN = 0, 0, 0, 0
 
-    #     print(f"Test image: {file}")
-    #     for icon in tqdm(natsorted(os.listdir(icon_dataset_path)), desc="icon"):
-    #         template = cv.imread(str(icon_dataset_path / icon))
-    #         icon_name = re.split('(\d+)-(.+)\.png', icon)[2]
-    #         clean_image_copy = image.copy()  # creating clean copy of image for displaying
-    #         match, num_matches, bbox = run(clean_image_copy, template)
+        print(f"Test image: {file}")
+        for icon in tqdm(natsorted(os.listdir(icon_dataset_path)), desc="icon"):
+            template = cv.imread(str(icon_dataset_path / icon))
+            icon_name = re.split('(\d+)-(.+)\.png', icon)[2]
+            clean_image_copy = image.copy()  # creating clean copy of image for displaying
+            match, num_matches, bbox = run(clean_image_copy, template)
 
-    #         if icon_name in icons_in_image.keys():  # icon is in image
-    #             if not match:  # False negative - icon not found
-    #                 print(
-    #                     f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {match}, Correct_match: {True}"
-    #                 )
-    #                 FN += 1
-    #                 continue
+            if icon_name in icons_in_image.keys():  # icon is in image
+                if not match:  # False negative - icon not found
+                    print(
+                        f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {match}, Correct_match: {True}"
+                    )
+                    FN += 1
+                    continue
 
-    #             # True positive
-    #             ground_truth_bbox = [
-    #                 icons_in_image[icon_name].top,
-    #                 icons_in_image[icon_name].left,
-    #                 icons_in_image[icon_name].bottom,
-    #                 icons_in_image[icon_name].right,
-    #             ]
-    #             draw_axis_bbox(clean_image_copy, ground_truth_bbox, (0, 255, 0))
+                # True positive
+                ground_truth_bbox = [
+                    icons_in_image[icon_name].top,
+                    icons_in_image[icon_name].left,
+                    icons_in_image[icon_name].bottom,
+                    icons_in_image[icon_name].right,
+                ]
+                draw_axis_bbox(clean_image_copy, ground_truth_bbox, (0, 255, 0))
 
-    #             iou = calc_iou(icons_in_image[icon_name], bbox)
+                iou = calc_iou(icons_in_image[icon_name], bbox)
 
-    #             if iou > 0.5:
-    #                 TP += 1 # True positive - made the right match
-    #             else:
-    #                 FP += 1 # False positive - made the wrong match
+                if iou > 0.5:
+                    TP += 1 # True positive - made the right match
+                else:
+                    FP += 1 # False positive - made the wrong match
                 
-    #             print(
-    #                 f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {match}, Correct_match: {True}, IOU: {iou}"
-    #             )
+                print(
+                    f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {iou > 0.5}, Correct_match: {True}, IOU: {iou}"
+                )
 
-    #         else:
-    #             iou = 0 # icon not in image
-    #             if match:  # False positive - not in image
-    #                 FP += 1
-    #             else:  # True negative
-    #                 TN += 1
-    #             print(
-    #                 f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {match}, Correct_match: {False}"
-    #             )
+            else:
+                iou = 0 # icon not in image
+                if match:  # False positive - not in image
+                    FP += 1
+                else:  # True negative
+                    TN += 1
+                print(
+                    f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {match}, Correct_match: {False}"
+                )
 
-    #     accuracy = ((TP + TN) / (TP + TN + FP + FN)) * 100
-    #     tpr = TP / (TP + FN) * 100
-    #     fpr = FP / (FP + TN) * 100
+        accuracy = ((TP + TN) / (TP + TN + FP + FN)) * 100
+        tpr = TP / (TP + FN) * 100
+        fpr = FP / (FP + TN) * 100
 
-    #     print(f"Accuracy: {accuracy}%, TPR: {round(tpr, 2)}%, FPR: {round(fpr, 2)}%")
-    #     total_accuracy += accuracy
-    #     total_tpr += tpr
-    #     total_fpr += fpr
+        print(f"Accuracy: {accuracy}%, TPR: {round(tpr, 2)}%, FPR: {round(fpr, 2)}%")
+        total_accuracy += accuracy
+        total_tpr += tpr
+        total_fpr += fpr
 
-    # average_accuracy = total_accuracy / len(os.listdir(images_path))
-    # average_tpr = total_tpr / len(os.listdir(images_path))
-    # average_fpr = total_fpr / len(os.listdir(images_path))
-    # print(f"Average Accuracy: {average_accuracy}%, Average TPR: {average_tpr}, Average FPR: {average_fpr}")
+        break
+
+    average_accuracy = total_accuracy / len(os.listdir(images_path))
+    average_tpr = total_tpr / len(os.listdir(images_path))
+    average_fpr = total_fpr / len(os.listdir(images_path))
+    print(f"Average Accuracy: {average_accuracy}%, Average TPR: {average_tpr}%, Average FPR: {average_fpr}%")
 
 
 if __name__ == "__main__":
