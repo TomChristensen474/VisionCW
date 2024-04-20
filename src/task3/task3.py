@@ -4,6 +4,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 import cv2 as cv
+from joblib import Parallel, delayed
 import numpy as np
 import numpy.typing as npt
 import os
@@ -16,6 +17,14 @@ import re
 class Point:
     x: int
     y: int
+
+
+@dataclass
+class Metrics:
+    TP: int
+    TN: int
+    FP: int
+    FN: int
 
 
 @dataclass
@@ -64,7 +73,7 @@ best matching points which are sorted based on lowest difference metric (e.g. lo
 
 
 def descriptor_point_match(described_template_keypoints, described_image_keypoints):
-    ssd_threshold = 15000
+    ssd_threshold = 120000
     r_value = 0.8
     matches: list[TemplateImageKeypointMatch] = []
     # for each template keypoint
@@ -200,18 +209,22 @@ def run(image, template) -> tuple[bool, int, list[int]]:
             thickness=1,
         )
 
+    # print(str(len(matches)))
     # 3. Threshold to identify matches -> need minimum 4 for homography
     if len(matches) < 4:
         return False, len(matches), []
 
     cv.imshow("matches", match_image)
+    # cv.waitKey(0)
 
     # 4. RANSAC to get robust homography
-    rsc = ransac.Ransac(distance_threshold=7)
-    homography, inliers, outliers, sampled_inliers = rsc.run_ransac(matches, iterations=20000)
+    rsc = ransac.Ransac(distance_threshold=15)
+    homography, inliers, outliers, sampled_inliers = rsc.run_ransac(matches, iterations=2000)
+
+    # print(str(len(inliers) + len(outliers)))
 
     # # 5. Threshold to identify matches within inliers -> a decent estimate for matching
-    if len(inliers) < 4:
+    if len(inliers) < 10:
         return False, len(inliers), []
 
     # get corners in template image
@@ -244,8 +257,8 @@ def run(image, template) -> tuple[bool, int, list[int]]:
     ]
 
     draw_axis_bbox(image, formatted_bbox_axes, (255, 0, 0))
-    cv.waitKey(4000) # uncomment to show images
-    # cv.destroyAllWindows()
+    # cv.waitKey(0)  # uncomment to show images
+    cv.destroyAllWindows()
 
     return True, len(matches), formatted_bbox_axes
 
@@ -309,12 +322,12 @@ def task3(folderName: str):
     annotations_path = dataset_folder / "annotations"
     icon_dataset_path = datasets_folder / "IconDataset" / "png"
 
-    # for testing purposes
-    template_path = icon_dataset_path / "15-barn.png"
-    image_path = images_path / "test_image_1.png"
-    template = cv.imread(str(template_path))
-    image = cv.imread(str(image_path))
-    run(image, template)
+    # # for testing purposes
+    # template_path = icon_dataset_path / "48-hospital.png"
+    # image_path = images_path / "test_image_1.png"
+    # template = cv.imread(str(template_path))
+    # image = cv.imread(str(image_path))
+    # run(image, template)
 
     total_accuracy = 0
 
@@ -330,23 +343,21 @@ def task3(folderName: str):
         for label, top, left, bottom, right in annotations.values:
             icons_in_image[label] = Icon(top, left, bottom, right, label)
 
-        total_accuracy, total_tpr, total_fpr = 0, 0, 0
-        TP, TN, FP, FN = 0, 0, 0, 0
-
         print(f"Test image: {file}")
-        for icon in tqdm(natsorted(os.listdir(icon_dataset_path)), desc="icon"):
+
+        @delayed
+        def detect_match_with_icon(icon) -> tuple[str, int, bool, bool, float|None, Metrics]:
+            TP, TN, FP, FN = 0, 0, 0, 0
             template = cv.imread(str(icon_dataset_path / icon))
-            icon_name = re.split('(\d+)-(.+)\.png', icon)[2]
+            icon_name = re.split("(\d+)-(.+)\.png", icon)[2]
             clean_image_copy = image.copy()  # creating clean copy of image for displaying
             match, num_matches, bbox = run(clean_image_copy, template)
 
             if icon_name in icons_in_image.keys():  # icon is in image
+                correct_match = True
                 if not match:  # False negative - icon not found
-                    print(
-                        f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {match}, Correct_match: {True}"
-                    )
                     FN += 1
-                    continue
+                    return icon_name, num_matches, match, correct_match, None, Metrics(TP, TN, FP, FN)
 
                 # True positive
                 ground_truth_bbox = [
@@ -360,39 +371,68 @@ def task3(folderName: str):
                 iou = calc_iou(icons_in_image[icon_name], bbox)
 
                 if iou > 0.5:
-                    TP += 1 # True positive - made the right match
+                    TP += 1  # True positive - made the right match
                 else:
-                    FP += 1 # False positive - made the wrong match
-                
-                print(
-                    f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {iou > 0.5}, Correct_match: {True}, IOU: {iou}"
-                )
+                    FN += 1  # False positive - made the wrong match
 
             else:
-                iou = 0 # icon not in image
+                correct_match = False
+                iou = None  # icon not in image
                 if match:  # False positive - not in image
                     FP += 1
                 else:  # True negative
                     TN += 1
+
+            metrics = Metrics(TP, TN, FP, FN)
+
+            return icon_name, num_matches, match, correct_match, iou, metrics
+
+        # for icon in tqdm(natsorted(os.listdir(icon_dataset_path)), desc="icon"):
+        results_generator = Parallel(n_jobs=-1, return_as="generator")(
+            detect_match_with_icon(icon) for icon in natsorted(os.listdir(icon_dataset_path))
+        )
+
+        total_accuracy, total_tpr, total_fpr, total_fnr = 0, 0, 0, 0
+        TP, TN, FP, FN = 0, 0, 0, 0
+
+        # results_generator = tqdm(results_generator, total=len(os.listdir(icon_dataset_path)), desc="icon")
+        for result in results_generator:
+            if result is None:
+                print("None returned")
+                continue
+            icon_name, num_matches, predicted_match, correct_match, iou, metrics = result
+            if iou:
                 print(
-                    f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {match}, Correct_match: {False}"
+                    f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {iou > 0.5}, Correct_match: {correct_match}, IOU: {iou}"
+                )
+            else:
+                print(
+                    f"Icon: {icon_name}, Matches: {num_matches}, Predicted_match: {predicted_match}, Correct_match: {correct_match}"
                 )
 
-        accuracy = ((TP + TN) / (TP + TN + FP + FN)) * 100
+
+                
+            TP += metrics.TP
+            TN += metrics.TN
+            FP += metrics.FP
+            FN += metrics.FN
+
+        accuracy = (TP + TN) / (TP + TN + FP + FN) * 100
         tpr = TP / (TP + FN) * 100
         fpr = FP / (FP + TN) * 100
+        fnr = FN / (TP + FN) * 100
 
-        print(f"Accuracy: {accuracy}%, TPR: {round(tpr, 2)}%, FPR: {round(fpr, 2)}%")
+        print(f"Accuracy: {accuracy}%, TPR: {round(tpr, 2)}%, FPR: {round(fpr, 2)}%, FNR: {round(fnr, 2)}%")
+
         total_accuracy += accuracy
         total_tpr += tpr
         total_fpr += fpr
-
-        break
+        total_fnr = fnr
 
     average_accuracy = total_accuracy / len(os.listdir(images_path))
     average_tpr = total_tpr / len(os.listdir(images_path))
     average_fpr = total_fpr / len(os.listdir(images_path))
-    print(f"Average Accuracy: {average_accuracy}%, Average TPR: {average_tpr}%, Average FPR: {average_fpr}%")
+    print(f"Average Accuracy: {average_accuracy}%, Average TPR: {average_tpr}%, Average FPR: {average_fpr}%, FNR: {total_fnr}%")
 
 
 if __name__ == "__main__":

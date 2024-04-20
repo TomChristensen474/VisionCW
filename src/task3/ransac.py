@@ -68,9 +68,9 @@ class Ransac:
             return apply_homography_transform(homography, points_to_transform)
 
 
-        sampled_points = self.sample_points(points, 3)
+        sampled_points, unsampled_points = self.sample_points(points, 3)
         homography = calc_homography(sampled_points)
-        transformed_points = apply_homography(points, homography)
+        transformed_points = apply_homography(unsampled_points, homography)
 
         def calculate_distance_between_points(point1: Point, point2: Point) -> float:
             return np.sqrt((point1.x - point2.x) ** 2 + (point1.y - point2.y) ** 2)
@@ -85,16 +85,22 @@ class Ransac:
             else:
                 inliers.append(PointMatch(template_point=points[index].template_point,  
                                           image_point=points[index].image_point))
+                
+        for point in sampled_points:
+            inliers.append(PointMatch(template_point=point.template_point, image_point=point.image_point))
 
         return inliers, outliers, homography
 
     # random sampling of points for line fitting and inlier outlier calculation
-    def sample_points(self, points: list[TemplateImageKeypointMatch], number: int) -> list[TemplateImageKeypointMatch]:
+    def sample_points(self, points: list[TemplateImageKeypointMatch], number: int) -> tuple[list[TemplateImageKeypointMatch], list[TemplateImageKeypointMatch]]:
         # random_sample = random.sample(points, 30) # random choice
         # sorted_sample = sorted(random_sample, key=lambda x: x.match_ssd)
         # return sorted_sample[:4]
 
-        return random.sample(points, number) # random choice of 4 points
+        sampled = random.sample(points, number)
+        unsampled = [point for point in points if point not in sampled]
+
+        return sampled, unsampled # random choice of 4 points
     
     def refine_homography(self, inliers: list[PointMatch]) -> Homography:
         p = np.zeros((3, len(inliers)))
