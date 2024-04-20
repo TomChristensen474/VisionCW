@@ -225,10 +225,35 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
 
         print(f"\nTest image: {file}")
 
-        # calculate all the metrics
+        # == calculate all the metrics ==
 
         all_labels = set(label for (label, _) in icons)
         matched_labels = set(match.label for match in matches)
+
+        # calculate intersection over union (IoU)
+        ious = {}
+        for icon in icons_in_image.values():
+            # get the corresponding match
+            match = next((m for m in matches if m.label == icon.label), None)
+            if match is None:
+                ious[icon.label] = 0
+                continue
+
+            correct_bbox = icon.bbox
+            predicted_bbox = match.bbox
+
+            intersection = correct_bbox.intersection_area(predicted_bbox)
+            union = correct_bbox.union_area(predicted_bbox)
+
+            iou = intersection / union
+            ious[icon.label] = iou
+
+            # if the IoU is <50%, it's not a match
+            # => remove it from the list of matches
+            if iou < 0.5:
+                matched_labels.remove(icon.label)
+
+        average_iou = sum(ious.values()) / len(ious)
 
         positives = set(icon.label for icon in icons_in_image.values())  # labels in image
         negatives = all_labels - positives  # labels not in image
@@ -249,26 +274,6 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         fpr = len(false_positives) / len(negatives)
         fnr = len(false_negatives) / len(positives)
         accuracy = (len(true_positives) + len(true_negatives)) / len(all_labels)
-
-        # calculate intersection over union (IoU)
-        ious = {}
-        for icon in icons_in_image.values():
-            # get the corresponding match
-            match = next((m for m in matches if m.label == icon.label), None)
-            if match is None:
-                ious[icon.label] = 0
-                continue
-
-            correct_bbox = icon.bbox
-            predicted_bbox = match.bbox
-
-            intersection = correct_bbox.intersection_area(predicted_bbox)
-            union = correct_bbox.union_area(predicted_bbox)
-
-            iou = intersection / union
-            ious[icon.label] = iou
-
-        iou = sum(ious.values()) / len(ious)
 
         print(
             f"Accuracy: {accuracy * 100:.3}% TPR: {tpr * 100:.3}% FPR: {fpr * 100:.3}% FNR: {fnr * 100:.3}% Average IoU: {iou * 100:.3}%"
