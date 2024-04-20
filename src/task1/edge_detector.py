@@ -10,7 +10,7 @@ class EdgeDetector:
 
 
     def dectect_edges(self, image_binary):
-
+        raise NotImplementedError
 
 
 if __name__ == "__main__":
