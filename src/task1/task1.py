@@ -6,13 +6,36 @@ from typing import Iterator
 import cv2 as cv
 import numpy as np
 import pandas as pd
+from joblib import delayed, Parallel
+
+from thinner import Thinner
 
 Image = np.ndarray
 
 
-def render(image: Image):
+@dataclass
+class Task1Config:
+    debug_level = 0
+    multithreaded = True
+    cannyify_image = True
+    thin_image = False
+    refined_votes = False
+    n_average_segment_tips = 1
+    trim_segment_edges = 0
+    manysegs_average_segments = True
+    use_average_theta = False
+    faster_nearest_idx = False
+
+    def is_debug(self, level: int) -> bool:
+        return self.debug_level >= level
+
+
+config = Task1Config()
+
+
+def render(image: Image, wait=True):
     cv.imshow("image", image)
-    cv.waitKey(0)
+    cv.waitKey(0 if wait else 1)
 
 
 def task1(folderName: str) -> float:
@@ -23,21 +46,29 @@ def task1(folderName: str) -> float:
     list_file = dataset_folder / "list.txt"
     image_files = pd.read_csv(list_file)
 
-    total_error = 0
-
-    for filename, actual_angle in image_files.values:
+    # for filename, actual_angle in image_files.values:
+    @delayed
+    def measure_angle(filename):
         image: Path = dataset_folder / filename
-        # if image.stem != "image5":
-        # continue
-
         predicted_angle = get_angle(image)
+        return predicted_angle
+
+    n_jobs = -1 if config.multithreaded else 1
+    measured_angles_generator = Parallel(n_jobs=n_jobs, return_as="generator")(
+        measure_angle(filename) for filename, _ in image_files.values
+    )
+
+    total_error = 0
+    for (filename, actual_angle), predicted_angle in zip(image_files.values, measured_angles_generator):
+        image: Path = dataset_folder / filename
+
         error = abs(predicted_angle - actual_angle)
 
+        total_error += error
         print(
-            f"Image: {image}, Predicted angle: {predicted_angle:.2f}, Actual: {actual_angle}, Error: {error:.2f}"
+            f"{image.stem} | Predicted angle: {predicted_angle:.2f}, Actual: {actual_angle}, Error: {error:.2f}"
         )
 
-        total_error += error
     print(f"Total error: {total_error:.2f}")
     return total_error
 
@@ -46,36 +77,35 @@ def get_angle(image_path: Path) -> float:
     # 0. read image
     image = read_image(image_path)
 
-    # 0.5 run canny on the image as a preprocessing step
-    image = cannyify_image(image)
-    # render(image)
+    if config.cannyify_image:
+        # run canny on the image as a preprocessing step
+        image = cannyify_image(image)
+    elif config.thin_image:
+        thinner = Thinner()
+        image = thinner.thin_image(image)
+
+    if config.is_debug(1):
+        render(image)
 
     # 1. get hough lines + segments from image
     segments = hough_segments(image)
 
     # 2. get angle from segments
-    angle = get_angle_from_segments(segments[0], segments[1])
+    if isinstance(segments, float):
+        angle = segments
+    else:
+        assert isinstance(segments, list)
+
+        if config.use_average_theta:
+            angle = get_angle_from_segments(segments[0], segments[1])
+        else:
+            angle = get_angle_from_vectors(segments[0], segments[1])
 
     return angle
 
 
 def cannyify_image(image: Image) -> Image:
     return cv.Canny(image, 100, 200)
-
-
-def calculate_angle(thetas, acute):
-    if acute:
-        if thetas[1] - thetas[0] > 90:
-            angle = 180 - (thetas[1] - thetas[0])
-        else:
-            angle = thetas[1] - thetas[0]
-    else:
-        if thetas[1] - thetas[0] > 90:
-            angle = thetas[1] - thetas[0]
-        else:
-            angle = 180 - (thetas[1] - thetas[0])
-
-    return abs(angle)
 
 
 def read_image(path: Path) -> Image:
@@ -86,6 +116,21 @@ def read_image(path: Path) -> Image:
 
     # img is now a 2d array, with values either 51 (grey) or 255 (white)
     return img
+
+
+@dataclass
+class Point:
+    x: int | float
+    y: int | float
+
+    def squared_distance_from(self, other: "Point") -> float:
+        return (self.x - other.x) ** 2 + (self.y - other.y) ** 2
+
+    def distance_from(self, other: "Point") -> float:
+        return math.sqrt(self.squared_distance_from(other))
+
+    def __hash__(self) -> int:
+        return hash((self.x, self.y))
 
 
 @dataclass
@@ -142,14 +187,53 @@ class HoughVotes:
     def avg_theta(self) -> float:
         return sum(vote.theta for vote in self.votes) / self.count
 
+    def avg_point(self) -> "Point":
+        avg_x = sum(vote.point.x for vote in self.votes) / self.count
+        avg_y = sum(vote.point.y for vote in self.votes) / self.count
+        return Point(avg_x, avg_y)
+
     def point_furthest_from(self, point: "Point") -> HoughVote:
-        return max(self.votes, key=lambda vote: (point.x - vote.point.x) ** 2 + (point.y - vote.point.y) ** 2)
+        return max(self.votes, key=lambda vote: point.squared_distance_from(vote.point))
 
-    def segment(self, intersection: "Point") -> Segment:
-        tip = self.point_furthest_from(intersection)
-        base = self.point_furthest_from(tip.point)
+    def n_points_furthest_from(self, point: "Point", n: int, trim: int) -> "HoughVotes":
+        # the segment edges can be funny, so trim says "ignore the 3 furthest points"
+        # assuming they're in the "funny" region
+        n += trim
 
-        segment = Segment(base.point.x, base.point.y, tip.point.x, tip.point.y, self)
+        if n == 1:
+            votes = [self.point_furthest_from(point)]
+        elif n > len(self.votes):
+            # no need to sort to get furthest, if we already have
+            # more than n points
+            votes = self.votes.copy()
+        else:
+            votes = sorted(self.votes, key=lambda vote: point.squared_distance_from(vote.point), reverse=True)
+            votes = votes[:n]
+
+        votes = votes[trim:]
+        return HoughVotes(votes)
+
+    def avg_point_furthest_from(self, point: "Point", n: int, trim: int, median: bool = False) -> HoughVote:
+        n_points = self.n_points_furthest_from(point, n, trim)
+        n_votes = n_points.votes
+
+        if median:
+            return n_votes[len(n_votes) // 2]
+        else:
+            avg_x = sum(vote.point.x for vote in n_votes) / len(n_votes)
+            avg_y = sum(vote.point.y for vote in n_votes) / len(n_votes)
+            avg_point = Point(avg_x, avg_y)
+
+            avg_rho = sum(vote.rho for vote in n_votes) / len(n_votes)
+            avg_theta = sum(vote.theta for vote in n_votes) / len(n_votes)
+
+            return HoughVote(avg_point, avg_rho, avg_theta)
+
+    def segment(self, intersection: "Point", n: int, trim: int) -> Segment:
+        avg_tip = self.avg_point_furthest_from(intersection, n, trim)
+        avg_base = self.avg_point_furthest_from(avg_tip.point, n, trim)
+
+        segment = Segment(avg_base.point.x, avg_base.point.y, avg_tip.point.x, avg_tip.point.y, self)
         return segment
 
     def avg_segment(self, intersection: "Point") -> Segment:
@@ -157,12 +241,15 @@ class HoughVotes:
 
         sorted_votes = sorted(self.votes, key=lambda vote: vote.point.squared_distance_from(tip.point))
 
-        left = sorted_votes[: len(sorted_votes) // 2]
-        right = sorted_votes[len(sorted_votes) // 2 :]
+        middle_idx = len(sorted_votes) // 2
+        left = sorted_votes[:middle_idx]
+        right = sorted_votes[middle_idx:]
 
         segments = []
         for left_vote, right_vote in zip(left, right):
-            segments.append(Segment(left_vote.point.x, left_vote.point.y, right_vote.point.x, right_vote.point.y, self))
+            segments.append(
+                Segment(left_vote.point.x, left_vote.point.y, right_vote.point.x, right_vote.point.y, self)
+            )
 
         left_avg_x = sum(seg.x1 for seg in segments) / len(segments)
         left_avg_y = sum(seg.y1 for seg in segments) / len(segments)
@@ -170,10 +257,6 @@ class HoughVotes:
         right_avg_y = sum(seg.y2 for seg in segments) / len(segments)
 
         return Segment(left_avg_x, left_avg_y, right_avg_x, right_avg_y, self)
-
-        # unit_segment = Segment(0, 0, 0, 1, self)
-        # thetas = [get_angle_from_segments(seg, unit_segment) for seg in segments]
-        # avg_theta
 
 
 @dataclass
@@ -209,12 +292,15 @@ class HoughAccumulator:
         ]
 
     def get_idx(self, val: float, arr: np.ndarray) -> int:
-        # https://stackoverflow.com/a/26026189
-        idx = arr.searchsorted(val, side="left")
-        # note: this is much faster than abs().argmin(), but
-        # truncates instead of rounding. in practice this means
-        # get_idx(5.9999) will return the same as get_idx(5) if
-        # arr only has whole numbers.
+        if config.faster_nearest_idx:
+            # https://stackoverflow.com/a/26026189
+            idx = arr.searchsorted(val, side="left")
+            # note: this is much faster than abs().argmin(), but
+            # truncates instead of rounding. in practice this means
+            # get_idx(5.9999) will return the same as get_idx(5) if
+            # arr only has whole numbers.
+        else:
+            idx = np.abs(arr - val).argmin()
 
         return int(idx)
 
@@ -259,13 +345,15 @@ class HoughAccumulator:
                     theta_cell_idx : theta_cell_idx + CELL_THETA_SIZE,
                 ]
 
+                # find the highest vote count of the cell
+                cell_max = cell.max()
+                if cell_max == 0:
+                    continue  # whole cells is 0s, maxima isn't here
+
                 # find the xy of the maximum in the cell
-                max_idxs = np.argwhere(cell == cell.max())[0]
+                max_idxs = np.argwhere(cell == cell_max)[0]
                 rho_idx_in_cell = max_idxs[0]
                 theta_idx_in_cell = max_idxs[1]
-
-                if cell[rho_idx_in_cell, theta_idx_in_cell] == 0:
-                    continue  # whole cells is 0s, maxima isn't here
 
                 rho_idx = rho_cell_idx + rho_idx_in_cell
                 theta_idx = theta_cell_idx + theta_idx_in_cell
@@ -331,8 +419,8 @@ class HoughAccumulator:
 
         # we got the N brightest spots. now look around them
         # and average the rhos/thetas of the points in the neighbourhood
-        NEIGHBOURHOOD_SIZE = 10
-        THRESHOLD_RATIO = 0.5  # only look at lines 0.7x as bright as the brightest line
+        NEIGHBOURHOOD_SIZE = 3
+        THRESHOLD_RATIO = 0.2  # only look at lines 0.5x as bright as the brightest line
 
         avg_local_maxima: list[HoughLocalMaximum] = []
         for local_maximum in n_local_maxima:
@@ -363,7 +451,7 @@ class HoughAccumulator:
         return avg_local_maxima
 
 
-def hough_segments(image: Image) -> list[Segment]:
+def hough_segments(image: Image) -> list[Segment] | float:
     # get all white pixels in the image
     points = list(white_points(image))
 
@@ -384,84 +472,55 @@ def hough_segments(image: Image) -> list[Segment]:
         y = point.y
 
         for theta_idx, theta in enumerate(thetas):
-
             rho = x * cos_thetas[theta_idx] + y * sin_thetas[theta_idx]
-            # rho_idx = np.abs(rhos - rho).argmin()
-
-            # accumulator[rho_idx, theta_idx] += 1
             accumulator.add_vote(point, rho, theta)
 
     most_voted_points = accumulator.local_maxima(2)  # i.e. both segments
-    assert len(most_voted_points) == 2
+    assert len(most_voted_points) == 2, f"Expected 2 local maxima, got {len(most_voted_points)}"
 
-    # tmp
-    theta1 = refine_theta(image, most_voted_points[0].votes)
-    theta2 = refine_theta(image, most_voted_points[1].votes)
-    print(theta1, theta2, abs(theta1 - theta2))
+    if config.refined_votes:
+        most_voted_points = [refine_votes(image, point.votes) for point in most_voted_points]
+        # theta1 = refine_votes(image, most_voted_points[0].votes)
+        # theta2 = refine_votes(image, most_voted_points[1].votes)
+        # print(theta1, theta2, abs(theta1 - theta2))
+        # return abs(theta1 - theta2)
 
-    # render accumulator and most voted points
-    # accumulator_img = accumulator.accumulator_array()
-    # for point in most_voted_points:
-    #     rho_idx = accumulator.rho_idx(point.avg_rho)
-    #     theta_idx = accumulator.theta_idx(point.avg_theta)
-    #     cv.circle(accumulator_img, (int(theta_idx), int(rho_idx)), 5, (255, 255, 255), 5)
-    # cv.imshow("accumulator", accumulator_img)
-    # cv.waitKey(0)
+    if config.is_debug(1):
+        # render accumulator and most voted points
+        accumulator_img = accumulator.accumulator_array()
+        for point in most_voted_points:
+            rho_idx = accumulator.rho_idx(point.avg_rho)
+            theta_idx = accumulator.theta_idx(point.avg_theta)
+            cv.circle(accumulator_img, (int(theta_idx), int(rho_idx)), 5, (255, 255, 255), 5)
+        cv.imshow("accumulator", accumulator_img)
+        cv.waitKey(0)
 
     # get intersection point
     line1 = most_voted_points[0].hough_line()
     line2 = most_voted_points[1].hough_line()
     intersection = get_intersection_point(line1, line2)
 
-    # points_in_common = set([vote.point for vote in most_voted_points[0].votes]) & set(
-    #     [vote.point for vote in most_voted_points[1].votes]
-    # )
-    # intersection_x = np.mean([point.x for point in points_in_common])
-    # intersection_y = np.mean([point.y for point in points_in_common])
+    n = config.n_average_segment_tips
+    trim = config.trim_segment_edges
+    if config.manysegs_average_segments:
+        segments = [
+            most_voted_point.votes.avg_segment(intersection)
+            for most_voted_point in most_voted_points
+        ]
+    else:
+        segments = [
+            most_voted_point.votes.segment(intersection, n, trim) for most_voted_point in most_voted_points
+        ]
 
-    # get other end of both segments
-    # segment_tips: list[HoughVote] = []
+    if config.is_debug(1):
+        # draw image and segment tip points
+        dbg_img = image.copy()
+        for segment in segments:
+            cv.circle(dbg_img, (int(segment.x1), int(segment.y1)), 2, (255, 255, 255), 1)
+            cv.circle(dbg_img, (int(segment.x2), int(segment.y2)), 2, (255, 255, 255), 1)
 
-    # for each segment
-    # for most_voted_point in most_voted_points:
-
-    # # sort the points on this segment by distance
-    # sorted_points_on_segment = sorted(
-    #     most_voted_point.votes, key=distance_from_intersection, reverse=True
-    # )
-
-    # # get the average of the 5 furthest points
-    # tip_x = np.mean([vote.point.x for vote in sorted_points_on_segment[:20]])
-    # tip_y = np.mean([vote.point.y for vote in sorted_points_on_segment[:20]])
-
-    # segment_tip = most_voted_point.votes.point_furthest_from(intersection)
-    # segment_tips.append(segment_tip)
-
-    # points_further_from_tip = [
-    #     segment_tip
-    #     for segment_tip in segment_tips
-    # ]
-
-    # segments: list[Segment] = []
-    # for segment_tip_x, segment_tip_y in segment_tips:
-    #     segment = Segment(
-    #         float(intersection_x),
-    #         float(intersection_y),
-    #         float(segment_tip_x),
-    #         float(segment_tip_y),
-    #     )
-    #     segments.append(segment)
-
-    segments = [most_voted_point.votes.segment(intersection) for most_voted_point in most_voted_points]
-
-    # tmp: draw accumulator and segment tip points
-    dbg_img = image.copy()
-    for segment in segments:
-        cv.circle(dbg_img, (int(segment.x1), int(segment.y1)), 2, (255, 255, 255), 1)
-        cv.circle(dbg_img, (int(segment.x2), int(segment.y2)), 2, (255, 255, 255), 1)
-
-    cv.imshow("accumulator", dbg_img)
-    cv.waitKey(0)
+        cv.imshow("accumulator", dbg_img)
+        cv.waitKey(0)
 
     return segments
 
@@ -491,24 +550,9 @@ def get_intersection_point(line1: HoughLine, line2: HoughLine) -> "Point":
     return Point(x, y)
 
 
-@dataclass
-class Point:
-    x: int
-    y: int
-
-    def __hash__(self) -> int:
-        return hash((self.x, self.y))
-
-    def squared_distance_from(self, other: "Point") -> float:
-        return (self.x - other.x) ** 2 + (self.y - other.y) ** 2
-
-    def distance_from(self, other: "Point") -> float:
-        return math.sqrt(self.squared_distance_from(other))
-
-
 def white_points(image: Image) -> Iterator[Point]:
     """Find all white pixels in the image."""
-    is_white = image > 230
+    is_white = image > 120
     ys, xs = np.nonzero(is_white)
     for x, y in zip(xs, ys):
         yield Point(x, y)
@@ -565,20 +609,22 @@ def get_angle_from_votes(votes1: HoughVotes, votes2: HoughVotes) -> float:
 
     return get_angle_from_vectors(segment1, segment2)
 
-def refine_theta(image: Image, votes: HoughVotes, n=1000) -> float:
+
+def refine_votes(image: Image, votes: HoughVotes, n=100) -> HoughLocalMaximum:
     thetas = [vote.theta for vote in votes.votes]
     max_theta = max(thetas)
     min_theta = min(thetas)
 
-    diagonal_length = int(np.sqrt(image.shape[0] ** 2 + image.shape[1] ** 2))
+    rhos = [vote.rho for vote in votes.votes]
+    max_rho = max(rhos)
+    min_rho = min(rhos)
 
     thetas = np.linspace(min_theta, max_theta, n)
-    rhos = np.linspace(-diagonal_length, diagonal_length, 1000)
+    rhos = np.linspace(min_rho, max_rho, n)
 
     sin_thetas = np.sin(np.deg2rad(thetas))
     cos_thetas = np.cos(np.deg2rad(thetas))
 
-    # accumulator = np.zeros((len(rhos), len(thetas)), dtype=np.uint8)
     accumulator = HoughAccumulator(rhos, thetas)
 
     for vote in votes.votes:
@@ -587,16 +633,24 @@ def refine_theta(image: Image, votes: HoughVotes, n=1000) -> float:
         y = point.y
 
         for theta_idx, theta in enumerate(thetas):
-
             rho = x * cos_thetas[theta_idx] + y * sin_thetas[theta_idx]
-            # rho_idx = np.abs(rhos - rho).argmin()
-
-            # accumulator[rho_idx, theta_idx] += 1
             accumulator.add_vote(point, rho, theta)
 
     most_voted_point = accumulator.local_maxima(1)[0]
 
-    return most_voted_point.avg_theta
+    if config.is_debug(1):
+        # render accumulator and most voted points
+        accumulator_img = accumulator.accumulator_array()
+
+        rho_idx = accumulator.rho_idx(most_voted_point.avg_rho)
+        theta_idx = accumulator.theta_idx(most_voted_point.avg_theta)
+        cv.circle(accumulator_img, (int(theta_idx), int(rho_idx)), 5, (255, 255, 255), 5)
+
+        cv.imshow("refined accumulator", accumulator_img)
+        cv.waitKey(0)
+
+    return most_voted_point
+
 
 if __name__ == "__main__":
     task1("Task1Dataset")
