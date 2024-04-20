@@ -177,10 +177,6 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
     images_path = dataset_folder / "images"
     annotations_path = dataset_folder / "annotations"
     icon_dataset_path = datasets_folder / icon_folder_name / "png"
-    # test_images = []
-
-    # Load test results
-    # for file in natsorted(os.listdir(annotations_path)):
 
     totals = {
         "positives": 0,
@@ -190,6 +186,8 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         "false_positives": 0,
         "false_negatives": 0,
     }
+    runtimes = []
+    all_ious = []
 
     # Preprocess templates for matching
     icons: list[tuple[str, GaussianPyramid]] = []
@@ -213,7 +211,11 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         # Load test image
         image = cv.imread(str(images_path / file))
 
+        start_time = time.time()
         matches = find_matching_icons(image, icons, version)
+        end_time = time.time()
+
+        runtimes.append(end_time - start_time)
 
         icons_in_image: dict[str, Icon] = {}
         csv_file = (annotations_path / file).with_suffix(".csv")
@@ -247,13 +249,12 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
 
             iou = intersection / union
             ious[icon.label] = iou
+            all_ious.append(iou)
 
             # if the IoU is <50%, it's not a match
             # => remove it from the list of matches
             if iou < 0.5:
                 matched_labels.remove(icon.label)
-
-        average_iou = sum(ious.values()) / len(ious)
 
         positives = set(icon.label for icon in icons_in_image.values())  # labels in image
         negatives = all_labels - positives  # labels not in image
@@ -276,7 +277,7 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         accuracy = (len(true_positives) + len(true_negatives)) / len(all_labels)
 
         print(
-            f"Accuracy: {accuracy * 100:.3}% TPR: {tpr * 100:.3}% FPR: {fpr * 100:.3}% FNR: {fnr * 100:.3}% Average IoU: {iou * 100:.3}%"
+            f"Accuracy: {accuracy * 100:.3}% TPR: {tpr * 100:.3}% FPR: {fpr * 100:.3}% FNR: {fnr * 100:.3}%"
         )
 
         print("True positives: (correct matches)")
@@ -305,6 +306,12 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
     print(
         f"Accuracy: {total_accuracy * 100:.3}% TPR: {total_tpr * 100:.3}% FPR: {total_fpr * 100:.3}% FNR: {total_fnr * 100:.3}%"
     )
+
+    average_iou = sum(all_ious) / len(all_ious)
+    print(f"Average IoU: {average_iou * 100:.3}%")
+
+    average_runtime = sum(runtimes) / len(runtimes)
+    print(f"Average runtime: {average_runtime:.3}s")
 
     return (total_accuracy, total_tpr, total_fpr, total_fnr)
 
