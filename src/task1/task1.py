@@ -355,6 +355,9 @@ class HoughAccumulator:
             # truncates instead of rounding. in practice this means
             # get_idx(5.9999) will return the same as get_idx(5) if
             # arr only has whole numbers.
+
+            if idx >= len(arr):
+                idx = len(arr) - 1
         else:
             idx = np.abs(arr - val).argmin()
 
@@ -486,12 +489,12 @@ class HoughAccumulator:
 
             for rho_idx in range(
                 max(0, local_maximum.rho_idx - NEIGHBOURHOOD_SIZE),
-                min(local_maximum.rho_idx + NEIGHBOURHOOD_SIZE, len(self.rhos) - 1),
+                min(local_maximum.rho_idx + NEIGHBOURHOOD_SIZE, len(self.rhos)),
             ):
 
                 for theta_idx in range(
                     max(0, local_maximum.theta_idx - NEIGHBOURHOOD_SIZE),
-                    min(local_maximum.theta_idx + NEIGHBOURHOOD_SIZE, len(self.thetas) - 1),
+                    min(local_maximum.theta_idx + NEIGHBOURHOOD_SIZE, len(self.thetas)),
                 ):
 
                     if self.matrix[rho_idx][theta_idx].count / local_maximum.votes.count < THRESHOLD_RATIO:
@@ -706,6 +709,44 @@ def refine_votes(image: Image, votes: HoughVotes, n=100) -> HoughLocalMaximum:
 
     return most_voted_point
 
+ALL_HYPERPARAMETERS_MODE = True
 
 if __name__ == "__main__":
-    task1("Task1Dataset")
+    if ALL_HYPERPARAMETERS_MODE:
+        hyperparam_combinations = {
+            "debug_level": [0],
+            "multithreaded": [True],
+        }
+
+        for field in Task1Config.__dataclass_fields__.values():
+            if field.name in hyperparam_combinations:
+                continue
+
+            if field.type == bool:
+                hyperparam_combinations[field.name] = [True, False]
+                continue
+
+            # n_average_segment_tips: int = 1
+            # trim_segment_edges: int = 0
+            match field.name:
+                case "n_average_segment_tips": hyperparam_combinations[field.name] = [1, 5, 15]
+                case "trim_segment_edges": hyperparam_combinations[field.name] = [0, 5]
+                case _: raise ValueError*(f"what do I do with {field.name}")
+
+        # https://stackoverflow.com/a/61335465
+        import itertools
+        keys, values = zip(*hyperparam_combinations.items())
+        hyperparam_permutations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+
+        for i, permutation in enumerate(hyperparam_permutations):
+            # invalid/redundant permutations
+            if permutation["cannyify_image"] and permutation["thin_image"]:
+                continue
+
+            print(f"Permutation {i+1}/{len(hyperparam_permutations)}: {permutation}")
+
+            config = Task1Config(**permutation)
+            task1("Task1Dataset")
+
+    else:
+        task1("Task1Dataset")
