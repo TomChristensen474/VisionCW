@@ -136,9 +136,8 @@ class Ransac:
 
 
 
-    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100) -> tuple[Homography, list[PointMatch], list[PointMatch], list[PointMatch]]:
-        # best_outlier_count = None  # fewer outliers better
-        maxRatio = 0.8
+    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100, maxRatio=0.8) -> tuple[Homography, list[PointMatch], list[PointMatch], list[PointMatch]]:
+
         best_inlier_ratio = 0
         best_inlier_count = 0
         best_outliers = []
