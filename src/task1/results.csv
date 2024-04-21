@@ -1,3 +1,2 @@
 when                ,total_error ,average_error ,avg_runtime ,multithreaded ,cannyify_image ,thin_image ,refined_votes ,n_average_segment_tips ,trim_segment_edges ,manysegs_average_segments ,use_average_theta ,faster_nearest_idx
 2024-04-21 11:03:49 ,       0.83 ,         0.08 ,      18.60 ,True          ,True           ,False      ,False         ,                     1 ,                 0 ,True                      ,False             ,False
-

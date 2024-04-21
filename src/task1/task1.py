@@ -18,14 +18,14 @@ Image = np.ndarray
 class Task1Config:
     debug_level: int = 0
     multithreaded: bool = True
-    cannyify_image: bool = True
-    thin_image: bool = False
+    cannyify_image: bool = False
+    thin_image: bool = True
     refined_votes: bool = False
     n_average_segment_tips: int = 1
     trim_segment_edges: int = 0
     manysegs_average_segments: bool = True
     use_average_theta: bool = False
-    faster_nearest_idx: bool = False
+    faster_nearest_idx: bool = True
 
     def is_debug(self, level: int) -> bool:
         return self.debug_level >= level
@@ -136,8 +136,9 @@ def get_angle(image_path: Path) -> float:
         # run canny on the image as a preprocessing step
         image = cannyify_image(image)
     elif config.thin_image:
+        _, binary_image = cv.threshold(image, 120, 255, cv.THRESH_BINARY)
         thinner = Thinner()
-        image = thinner.thin_image(image)
+        image = thinner.thin_image(binary_image)
 
     if config.is_debug(1):
         render(image)
