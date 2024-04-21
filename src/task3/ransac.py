@@ -48,8 +48,8 @@ class Ransac:
         inliers = []
 
         def calc_homography(points: list[TemplateImageKeypointMatch]) -> Homography:
-            p = np.zeros((3, 3))
-            q = np.zeros((3, 3))
+            p = np.zeros((3, 4))
+            q = np.zeros((3, 4))
 
             for i, point in enumerate(points):  # should be 4 points in list
                 p[0, i] = point.template_point.x
@@ -60,7 +60,7 @@ class Ransac:
                 q[1, i] = point.image_point.y
                 q[2, i] = 1
 
-            return self.four_point_algorithm(p, q, 3)
+            return self.four_point_algorithm(p, q, 4)
 
         def apply_homography(points: list[TemplateImageKeypointMatch], homography: Homography) -> list[Point]:
             points_to_transform = np.array([[point.template_point.x, point.template_point.y] for point in points])
@@ -68,7 +68,7 @@ class Ransac:
             return apply_homography_transform(homography, points_to_transform)
 
 
-        sampled_points, unsampled_points = self.sample_points(points, 3)
+        sampled_points, unsampled_points = self.sample_points(points, 4)
         homography = calc_homography(sampled_points)
         transformed_points = apply_homography(unsampled_points, homography)
 
