@@ -1,4 +1,5 @@
 import math
+import time
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Iterator
@@ -15,22 +16,58 @@ Image = np.ndarray
 
 @dataclass
 class Task1Config:
-    debug_level = 0
-    multithreaded = True
-    cannyify_image = True
-    thin_image = False
-    refined_votes = False
-    n_average_segment_tips = 1
-    trim_segment_edges = 0
-    manysegs_average_segments = True
-    use_average_theta = False
-    faster_nearest_idx = False
+    debug_level: int = 0
+    multithreaded: bool = True
+    cannyify_image: bool = True
+    thin_image: bool = False
+    refined_votes: bool = False
+    n_average_segment_tips: int = 1
+    trim_segment_edges: int = 0
+    manysegs_average_segments: bool = True
+    use_average_theta: bool = False
+    faster_nearest_idx: bool = False
 
     def is_debug(self, level: int) -> bool:
         return self.debug_level >= level
 
 
 config = Task1Config()
+
+
+class CsvWriter:
+    def __init__(self):
+        self.path = Path(__file__).parent / "results.csv"
+
+        self.config_columns = list(Task1Config.__dataclass_fields__.keys())
+        self.config_columns.remove("debug_level")
+
+        self.columns = [
+            "when",
+            "total_error",
+            "average_error",
+            "avg_runtime",
+        ] + self.config_columns
+
+        if not self.path.exists():  # if csv file doesn't exist, create it and write row names (first line)
+            self.file = open(self.path, "w")
+            self.file.write(",".join(self.columns) + "\n")
+        else:  # if csv file exists, make sure row names are what we are going to write
+            with self.path.open("r") as f:
+                expected_header = ",".join(self.columns).replace(" ", "")
+                actual_header = f.readline().strip().replace(" ", "")
+                assert (
+                    expected_header == actual_header
+                ), f"CSV file has wrong header\nexpecting: {expected_header}\ngot:       {actual_header}"
+
+            self.file = open(self.path, "a")
+
+    def add(self, total_error, average_error, avg_runtime):
+        when = time.strftime("%Y-%m-%d %H:%M:%S")
+        fields_to_write = [when, total_error, average_error, avg_runtime]
+        fields_to_write += [getattr(config, field) for field in self.config_columns]
+
+        fields_to_write = [f"{x:.2f}" if isinstance(x, float) else str(x) for x in fields_to_write]
+        self.file.write(",".join(fields_to_write) + "\n")
 
 
 def render(image: Image, wait=True):
@@ -50,8 +87,13 @@ def task1(folderName: str) -> float:
     @delayed
     def measure_angle(filename):
         image: Path = dataset_folder / filename
+
+        start = time.time()
         predicted_angle = get_angle(image)
-        return predicted_angle
+        end = time.time()
+
+        runtime = end - start
+        return predicted_angle, runtime
 
     n_jobs = -1 if config.multithreaded else 1
     measured_angles_generator = Parallel(n_jobs=n_jobs, return_as="generator")(
@@ -59,17 +101,30 @@ def task1(folderName: str) -> float:
     )
 
     total_error = 0
-    for (filename, actual_angle), predicted_angle in zip(image_files.values, measured_angles_generator):
+    total_runtime = 0
+    for (filename, actual_angle), (predicted_angle, runtime) in zip(  # type: ignore
+        image_files.values, measured_angles_generator
+    ):
         image: Path = dataset_folder / filename
 
         error = abs(predicted_angle - actual_angle)
 
         total_error += error
+        total_runtime += runtime
+
         print(
-            f"{image.stem} | Predicted angle: {predicted_angle:.2f}, Actual: {actual_angle}, Error: {error:.2f}"
+            f"{image.stem} | Predicted angle: {predicted_angle:.2f}, Actual: {actual_angle}, Error: {error:.2f} | Runtime: {runtime:.2f}s"
         )
 
-    print(f"Total error: {total_error:.2f}")
+    average_error = total_error / len(image_files)
+    average_runtime = total_runtime / len(image_files)
+    print(
+        f"Total error: {total_error:.2f}, Average error: {average_error:.2f}, Average runtime: {average_runtime:.2f}s"
+    )
+
+    csv_writer = CsvWriter()
+    csv_writer.add(total_error, average_error, average_runtime)
+
     return total_error
 
 
@@ -504,8 +559,7 @@ def hough_segments(image: Image) -> list[Segment] | float:
     trim = config.trim_segment_edges
     if config.manysegs_average_segments:
         segments = [
-            most_voted_point.votes.avg_segment(intersection)
-            for most_voted_point in most_voted_points
+            most_voted_point.votes.avg_segment(intersection) for most_voted_point in most_voted_points
         ]
     else:
         segments = [

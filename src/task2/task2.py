@@ -26,6 +26,7 @@ class Config:
     threshold: float | Literal["variable"] = "variable"
     metric: Literal["mcc", "ssd"] = "mcc"
     cv_bbox_method: bool = False
+    filter_nested: bool = True
 
     def is_debug(self, level: int) -> bool:
         return self.debug_level >= level
@@ -45,15 +46,23 @@ class CsvWriter:
         self.config_columns = list(Config.__dataclass_fields__.keys())
         self.config_columns.remove("debug_level")
 
-        self.columns = ["when", "accuracy", "TPR", "FPR", "FNR", "avg_IoU", "avg_runtime"] + self.config_columns
+        self.columns = [
+            "when",
+            "accuracy",
+            "TPR",
+            "FPR",
+            "FNR",
+            "avg_IoU",
+            "avg_runtime",
+        ] + self.config_columns
 
         if not self.path.exists():  # if csv file doesn't exist, create it and write row names (first line)
             self.file = open(self.path, "w")
             self.file.write(",".join(self.columns) + "\n")
         else:  # if csv file exists, make sure row names are what we are going to write
             with self.path.open("r") as f:
-                expected_header = ",".join(self.columns)
-                actual_header = f.readline().strip()
+                expected_header = ",".join(self.columns).replace(" ", "")
+                actual_header = f.readline().strip().replace(" ", "")
                 assert (
                     expected_header == actual_header
                 ), f"CSV file has wrong header\nexpecting: {expected_header}\ngot:       {actual_header}"
@@ -65,7 +74,7 @@ class CsvWriter:
         fields_to_write = [when, accuracy, tpr, fpr, fnr, avg_iou, avg_runtime]
         fields_to_write += [getattr(config, field) for field in self.config_columns]
 
-        fields_to_write = [str(x) for x in fields_to_write]
+        fields_to_write = [f"{x:.2f}" if isinstance(x, float) else str(x) for x in fields_to_write]
         self.file.write(",".join(fields_to_write) + "\n")
 
 
@@ -661,16 +670,20 @@ def find_matching_icons(image: Image, icons: list[tuple[str, GaussianPyramid]]) 
         return find_matching_icons_2(image, icons)
 
 
-def filter_nested_matches(filtered_matches: list[Match]) -> list[Match]:
+def filter_nested_matches(matches: list[Match]) -> list[Match]:
+    if not config.filter_nested:
+        return matches
+
     # detect nested bounding boxes, and only keep the largest one
     matches_to_remove = set()
-    for match1 in filtered_matches:
-        for match2 in filtered_matches:
+    for match1 in matches:
+        for match2 in matches:
             if match1 == match2:
                 continue
 
             assert match1.bbox is not None
             assert match2.bbox is not None
+
             if match1.bbox.overlaps_with(match2.bbox):
                 bbox1_sides = (match1.bbox.x2 - match1.bbox.x1) + (match1.bbox.y2 - match1.bbox.y1)
                 bbox2_sides = (match2.bbox.x2 - match2.bbox.x1) + (match2.bbox.y2 - match2.bbox.y1)
@@ -678,7 +691,7 @@ def filter_nested_matches(filtered_matches: list[Match]) -> list[Match]:
                 match_to_remove = match2 if bbox1_sides > bbox2_sides else match1
                 matches_to_remove.add(match_to_remove)
 
-    filtered_matches = [match for match in filtered_matches if match not in matches_to_remove]
+    filtered_matches = [match for match in matches if match not in matches_to_remove]
     return filtered_matches
 
 
