@@ -1,0 +1,2 @@
+when                ,accuracy ,TPR                ,FPR ,FNR                  ,avg_IoU            ,avg_runtime        ,pyramid_levels ,scale_factors ,threshold ,metric ,cv_bbox_method
+2024-04-21 10:33:17 ,   0.999 ,0.9885057471264368 ,0.0 ,0.011494252873563218 ,0.9645629461619919 ,27.161912941932677 ,             4 ,variable      ,variable  ,mcc    ,False

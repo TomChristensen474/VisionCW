@@ -4,7 +4,7 @@ from joblib import Parallel, delayed
 from natsort import natsorted
 from pathlib import Path
 from scipy import ndimage
-from typing import Iterator, List
+from typing import List, Literal
 from tqdm import tqdm
 
 import cv2 as cv
@@ -18,11 +18,55 @@ from gaussian_pyramid import GaussianPyramid
 Image = np.ndarray
 
 
-DEBUG_LEVEL = 0
+@dataclass
+class Config:
+    debug_level: int = 0
+    pyramid_levels: int = 4
+    scale_factors: int | Literal["variable"] = "variable"
+    threshold: float | Literal["variable"] = "variable"
+    metric: Literal["mcc", "ssd"] = "mcc"
+    cv_bbox_method: bool = False
+
+    def is_debug(self, level: int) -> bool:
+        return self.debug_level >= level
+
+
+config = Config()
 
 
 def print(s=""):
     tqdm.write(str(s))
+
+
+class CsvWriter:
+    def __init__(self):
+        self.path = Path(__file__).parent / "results.csv"
+
+        self.config_columns = list(Config.__dataclass_fields__.keys())
+        self.config_columns.remove("debug_level")
+
+        self.columns = ["when", "accuracy", "TPR", "FPR", "FNR", "avg_IoU", "avg_runtime"] + self.config_columns
+
+        if not self.path.exists():  # if csv file doesn't exist, create it and write row names (first line)
+            self.file = open(self.path, "w")
+            self.file.write(",".join(self.columns) + "\n")
+        else:  # if csv file exists, make sure row names are what we are going to write
+            with self.path.open("r") as f:
+                expected_header = ",".join(self.columns)
+                actual_header = f.readline().strip()
+                assert (
+                    expected_header == actual_header
+                ), f"CSV file has wrong header\nexpecting: {expected_header}\ngot:       {actual_header}"
+
+            self.file = open(self.path, "a")
+
+    def add(self, accuracy, tpr, fpr, fnr, avg_iou, avg_runtime):
+        when = time.strftime("%Y-%m-%d %H:%M:%S")
+        fields_to_write = [when, accuracy, tpr, fpr, fnr, avg_iou, avg_runtime]
+        fields_to_write += [getattr(config, field) for field in self.config_columns]
+
+        fields_to_write = [str(x) for x in fields_to_write]
+        self.file.write(",".join(fields_to_write) + "\n")
 
 
 @dataclass
@@ -167,9 +211,6 @@ class Match:
 
 
 def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, float, float]:
-    # returns (Acc,TPR,FPR,FNR)
-    version = 3
-
     this_file = Path(__file__)
     datasets_folder = this_file.parent.parent.parent / "datasets"
     dataset_folder = datasets_folder / test_folder_name
@@ -191,18 +232,18 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
 
     # Preprocess templates for matching
     icons: list[tuple[str, GaussianPyramid]] = []
-    for file in os.listdir(icon_dataset_path):
-        image_path = icon_dataset_path / file
-        image = cv.imread(str(image_path))
+    for icon_file in os.listdir(icon_dataset_path):
+        icon_path = icon_dataset_path / icon_file
+        icon_image = cv.imread(str(icon_path))
 
         # Create scaled templates
-        pyramid = GaussianPyramid(image)
+        icon_pyramid = GaussianPyramid(icon_image, config.pyramid_levels)
 
         # Create rotated templates
         # templates.extend(create_rotated_templates(templates))
 
-        label = image_path.stem
-        icon = (label, pyramid)
+        icon_label = icon_path.stem
+        icon = (icon_label, icon_pyramid)
         icons.append(icon)
 
     # found_matches = []
@@ -212,7 +253,7 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         image = cv.imread(str(images_path / file))
 
         start_time = time.time()
-        matches = find_matching_icons(image, icons, version)
+        matches = find_matching_icons(image, icons)
         end_time = time.time()
 
         runtimes.append(end_time - start_time)
@@ -304,14 +345,24 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
     print("\n Total final stats:")
     print(str(totals))
     print(
-        f"Accuracy: {total_accuracy * 100:.3}% TPR: {total_tpr * 100:.3}% FPR: {total_fpr * 100:.3}% FNR: {total_fnr * 100:.3}%"
+        f"Accuracy: {total_accuracy * 100:.2f}% TPR: {total_tpr * 100:.2f}% FPR: {total_fpr * 100:.2f}% FNR: {total_fnr * 100:.2f}%"
     )
 
     average_iou = sum(all_ious) / len(all_ious)
-    print(f"Average IoU: {average_iou * 100:.3}%")
+    print(f"Average IoU: {average_iou * 100:.2f}%")
 
     average_runtime = sum(runtimes) / len(runtimes)
-    print(f"Average runtime: {average_runtime:.3}s")
+    print(f"Average runtime: {average_runtime:.2f}s")
+
+    csv_writer = CsvWriter()
+    csv_writer.add(
+        accuracy=total_accuracy,
+        tpr=total_tpr,
+        fpr=total_fpr,
+        fnr=total_fnr,
+        avg_iou=average_iou,
+        avg_runtime=average_runtime,
+    )
 
     return (total_accuracy, total_tpr, total_fpr, total_fnr)
 
@@ -457,15 +508,24 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
     @delayed
     def get_label_icon_match(image, icon_label_and_pyramid) -> Match | None:
         icon_label, icon_pyramid = icon_label_and_pyramid
-        image_pyramid = GaussianPyramid(image)
+        image_pyramid = GaussianPyramid(image, config.pyramid_levels)
 
-        scale_factor_multipliers_per_level = [
-            [1.0],
-            np.linspace(0.95, 1.05, 3).tolist(),
-            np.linspace(0.8, 1.2, 5).tolist(),
-            np.linspace(0.1, 0.9, 8).tolist(),
-        ]
-        thresholds_per_level = [0.15, 0.2, 0.3, 0.4]
+        if config.scale_factors == "variable":
+            scale_factor_multipliers_per_level = [
+                [1.0],
+                np.linspace(0.95, 1.05, 3).tolist(),
+                np.linspace(0.8, 1.2, 5).tolist(),
+                np.linspace(0.1, 0.9, 8).tolist(),
+            ]
+        else:
+            scale_factor_multipliers_per_level = (
+                [np.linspace(0.1, 1.0, config.scale_factors).tolist()] * config.pyramid_levels,
+            )
+
+        if config.threshold == "variable":
+            thresholds_per_level = [0.15, 0.2, 0.3, 0.4]
+        else:
+            thresholds_per_level = [config.threshold] * config.pyramid_levels
 
         # the bounding box of the search space i.e. where the icon was on the previous level
         # (between pyramid levels, will need to be x2 for next level)
@@ -551,7 +611,7 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 template_shape = scaled_template.shape
                 best_scale_factor_bbox = Rectangle(x1, y1, x1 + template_shape[0], y1 + template_shape[1])
 
-                if DEBUG_LEVEL >= 1:
+                if config.is_debug(1):
                     # render image with bounding box
                     match = Match(icon_label, min_difference, best_scale_factor_bbox, scaled_template)
                     render(scaled_image, [match])
@@ -594,18 +654,11 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
     return matches
 
 
-def find_matching_icons(image: Image, icons: list[tuple[str, GaussianPyramid]], version: int) -> list[Match]:
-    match version:
-        case 2:
-            return find_matching_icons_2(image, icons)
-        case 3:
-            return find_matching_icons_3a(image, icons)
-        case _:
-            raise ValueError("Invalid version number")
-
-
-def filter_matches(matches: List[Match], threshold: float) -> List[Match]:
-    return [match for match in matches if match.difference < threshold]
+def find_matching_icons(image: Image, icons: list[tuple[str, GaussianPyramid]]) -> list[Match]:
+    if config.cv_bbox_method:
+        return find_matching_icons_3a(image, icons)
+    else:
+        return find_matching_icons_2(image, icons)
 
 
 def filter_nested_matches(filtered_matches: list[Match]) -> list[Match]:
@@ -648,7 +701,7 @@ def match_template(image: Image, template: Image):
             if (patch1 == 255).all() or (patch1 == 0).all():
                 continue
 
-            if DEBUG_LEVEL >= 2:
+            if config.is_debug(2):
                 bbox = Rectangle(x, y, x + template_width, y + template_height)
                 match = Match("", 0, bbox, template)
                 render(image, [match])
@@ -656,8 +709,8 @@ def match_template(image: Image, template: Image):
             result[x, y] = calculate_patch_similarity(
                 patch1,
                 template,
-                False,
-                True,
+                config.metric == "ssd",
+                config.metric == "mcc",
             )
 
     # render(result)
@@ -772,16 +825,16 @@ def calculate_patch_similarity(
 
         diff = patch1_hat * patch2_hat
 
-        if DEBUG_LEVEL >= 2:
+        if config.is_debug(2):
             # norm_diff = 1. - (diff + 1.) / 2. * 255.
             # imshow(norm_diff, "diff")
             pass
 
-        mean_diff = diff.mean() # [-1, 1]
+        mean_diff = diff.mean()  # [-1, 1]
         assert not np.isnan(mean_diff)
 
-        mean_diff = (mean_diff + 1.) / 2. # [0, 1]
-        mean_diff = 1.0 - mean_diff # [1, 0] because 0 is "no difference"
+        mean_diff = (mean_diff + 1.0) / 2.0  # [0, 1]
+        mean_diff = 1.0 - mean_diff  # [1, 0] because 0 is "no difference"
 
         return mean_diff
 
@@ -798,7 +851,7 @@ def calculate_patch_similarity(
 
     assert 0 <= match_score <= 1
 
-    if DEBUG_LEVEL >= 2:
+    if config.is_debug(2):
         if match_score < 0.3:
             print(str(match_score))
             imshow(patch1, "patch1")
