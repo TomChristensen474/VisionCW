@@ -12,7 +12,7 @@ import os
 import pandas as pd
 import ransac
 import re
-
+import time
 
 @dataclass
 class Point:
@@ -62,7 +62,7 @@ def print(s=""):
 def compare_descriptors_ssd(descriptor1, descriptor2):
     ssd_total = 0
     for i in range(len(descriptor1)):
-        ssd = (descriptor1[i] - descriptor2[i]) ** 2
+        ssd = ((descriptor1[i] - descriptor2[i]) ** 2) / (255 ** 2) # normalised square difference
         ssd_total += ssd
     return ssd_total
 
@@ -217,8 +217,8 @@ def run(
                 markerSize=10,
                 thickness=1,
             )
+        print(str(len(matches)))
 
-    # print(str(len(matches)))
     # 3. Threshold to identify matches -> need minimum 4 for homography
     if len(matches) < 4:
         return False, len(matches), []
@@ -368,12 +368,12 @@ def task3(folderName: str):
                     clean_image_copy,
                     template,
                     debug=False,
-                    octave_layers=3,
-                    ssd_threshold=120000,
-                    R=0.8,
-                    distance_threshold=15,
-                    iterations=200,
-                    min_inliers=10,
+                    octave_layers=octave_layers,
+                    ssd_threshold=ssd_threshold,
+                    R=R,
+                    distance_threshold=distance_threshold,
+                    iterations=iterations,
+                    min_inliers=min_inliers,
                 )
 
                 if icon_name in icons_in_image.keys():  # icon is in image
@@ -461,79 +461,83 @@ def task3(folderName: str):
     # octave_layers = np.linspace(3, 9, 4)  # 3, 5, 7, 9
     # ssd_threshold = np.linspace(10000, 150000, 15)
     # R = np.linspace(0.5, 0.95, 10)
-    # distance_threshold = np.linspace(1, 50, 20)
+    distance_threshold = np.linspace(2, 30, 10)
     # iterations = np.linspace(100, 1000, 10)
-    # # maxRatio = np.linspace(0.5, 0.95, 10) # not used at the moment
+    # maxRatio = np.linspace(0.5, 0.95, 10) # not used at the moment
     # min_inliers = np.linspace(3, 25, 22)
 
     # # for testing purposes
-    # template_path = icon_dataset_path / "48-hospital.png"
-    # image_path = images_path / "test_image_1.png"
-    # template = cv.imread(str(template_path))
-    # image = cv.imread(str(image_path))
-    # run(image, template, debug=True octave_layers=3, ssd_threshold=120000, R=0.8, distance_threshold=15, iterations=200, min_inliers=10)
+    template_path = icon_dataset_path / "48-hospital.png"
+    image_path = images_path / "test_image_1.png"
+    template = cv.imread(str(template_path))
+    image = cv.imread(str(image_path))
+    run(image, template, debug=True, octave_layers=5, ssd_threshold=5, R=0.4, distance_threshold=2, iterations=200, min_inliers=4)
 
-    octave_layers = [3]
-    # ssd_threshold=1200000,
-    R = [0.8]
-    # distance_threshold=15,
-    iterations = [200]
-    maxRatio = [0.8]
-    min_inliers = [10]
+    # octave_layers = [3]
+    # ssd_threshold=[1200000]
+    # R = [1]
+    # # distance_threshold=15,
+    # iterations = [200]
+    # maxRatio = [0.8]
+    # min_inliers = [4]
 
-    ssd_threshold = np.linspace(10000, 150000, 5)
-    distance_threshold = np.linspace(1, 25, 5)
+    # ssd_threshold = np.linspace(10000, 150000, 5)
+    # distance_threshold = np.linspace(1, 25, 5)
 
-    with open("task3.csv", "w", newline="") as csvfile:
-        fieldnames = [
-            "param_set",
-            "octave_layers",
-            "ssd_threshold",
-            "R",
-            "distance_threshold",
-            "iterations",
-            "min_inliers",
-            "accuracy",
-            "tpr",
-            "fpr",
-            "fnr",
-        ]
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        param_set = 0
-        for octave_layer in octave_layers:
-            for ssd in ssd_threshold:
-                for r in R:
-                    for distance in distance_threshold:
-                        for iteration in iterations:
-                            for min_inlier in min_inliers:
-                                param_set += 1
-                                accuracy, tpr, fpr, fnr = feature_match(
-                                    images_path,
-                                    annotations_path,
-                                    icon_dataset_path,
-                                    octave_layer,
-                                    ssd,
-                                    r,
-                                    distance,
-                                    iteration,
-                                    min_inlier,
-                                )
-                                writer.writerow(
-                                    {
-                                        "param_set": param_set,
-                                        "octave_layers": octave_layer,
-                                        "ssd_threshold": ssd,
-                                        "R": r,
-                                        "distance_threshold": distance,
-                                        "iterations": iteration,
-                                        "min_inliers": min_inlier,
-                                        "accuracy": accuracy,
-                                        "tpr": tpr,
-                                        "fpr": fpr,
-                                        "fnr": fnr,
-                                    }
-                                )
+    # with open("task3.csv", "w", newline="") as csvfile:
+    #     fieldnames = [
+    #         "when",
+    #         "param_set",
+    #         "octave_layers",
+    #         "ssd_threshold",
+    #         "R",
+    #         "distance_threshold",
+    #         "iterations",
+    #         "min_inliers",
+    #         "accuracy",
+    #         "tpr",
+    #         "fpr",
+    #         "fnr",
+    #     ]
+    #     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    #     writer.writeheader()
+    #     param_set = 0
+    #     for octave_layer in octave_layers:
+    #         for ssd in ssd_threshold:
+    #             for r in R:
+    #                 for distance in distance_threshold:
+    #                     for iteration in iterations:
+    #                         for min_inlier in min_inliers:
+    #                             # print(str(param_set) + " " + str(octave_layer) + " " + str(ssd) + " " + str(r) + " " + str(distance) + " " + str(iteration) + " " + str(min_inlier) + "\n\n")
+    #                             print(f"octave_layers: {octave_layer}, ssd_threshold: {ssd}, R: {r}, distance_threshold: {distance}, iterations: {iteration}, min_inliers: {min_inlier}")
+    #                             param_set += 1
+    #                             accuracy, tpr, fpr, fnr = feature_match(
+    #                                 images_path,
+    #                                 annotations_path,
+    #                                 icon_dataset_path,
+    #                                 octave_layer,
+    #                                 ssd,
+    #                                 r,
+    #                                 distance,
+    #                                 iteration,
+    #                                 min_inlier,
+    #                             )
+    #                             when = time.strftime("%Y-%m-%d %H:%M:%S")
+    #                             writer.writerow(
+    #                                 {
+    #                                     "when": when,
+    #                                     "octave_layers": octave_layer,
+    #                                     "ssd_threshold": ssd,
+    #                                     "R": r,
+    #                                     "distance_threshold": distance,
+    #                                     "iterations": iteration,
+    #                                     "min_inliers": min_inlier,
+    #                                     "accuracy": accuracy,
+    #                                     "tpr": tpr,
+    #                                     "fpr": fpr,
+    #                                     "fnr": fnr,
+    #                                 }
+    #                             )
 
 
 if __name__ == "__main__":
