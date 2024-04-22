@@ -32,7 +32,7 @@ class Config:
         return self.debug_level >= level
 
 
-config = Config()
+# config = Config()
 
 
 def print(s=""):
@@ -326,9 +326,7 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         fnr = len(false_negatives) / len(positives)
         accuracy = (len(true_positives) + len(true_negatives)) / len(all_labels)
 
-        print(
-            f"Accuracy: {accuracy * 100:.3}% TPR: {tpr * 100:.3}% FPR: {fpr * 100:.3}% FNR: {fnr * 100:.3}%"
-        )
+        print(f"Accuracy: {accuracy * 100:.3}% TPR: {tpr * 100:.3}% FPR: {fpr * 100:.3}% FNR: {fnr * 100:.3}%")
 
         print("True positives: (correct matches)")
         for label in true_positives:
@@ -484,9 +482,7 @@ def render(
         match_width = int(image.shape[1] / 2)
         match_height = int(image.shape[0] / 2)
 
-        icons = [
-            cv.resize(icon, (match_width, match_height), interpolation=cv.INTER_NEAREST) for icon in icons
-        ]
+        icons = [cv.resize(icon, (match_width, match_height), interpolation=cv.INTER_NEAREST) for icon in icons]
         icons = np.hstack(icons)
 
         search_areas = [
@@ -503,9 +499,7 @@ def render(
         # just resize and hstack the image, search area and icon
 
         icon = cv.resize(icons[0], (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST)
-        search_area = cv.resize(
-            search_areas[0], (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST
-        )
+        search_area = cv.resize(search_areas[0], (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST)
 
         image = np.hstack((image, search_area, icon))
 
@@ -525,11 +519,16 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 np.linspace(0.95, 1.05, 3).tolist(),
                 np.linspace(0.8, 1.2, 5).tolist(),
                 np.linspace(0.1, 0.9, 8).tolist(),
+                np.linspace(0.05, 0.95, 10).tolist(),
             ]
         else:
-            scale_factor_multipliers_per_level = (
-                [np.linspace(0.1, 1.0, config.scale_factors).tolist()] * config.pyramid_levels,
-            )
+            scale_factor_multipliers_per_level = [
+                [1.0],
+                np.linspace(0.95, 1.05, 3 * config.scale_factors).tolist(),
+                np.linspace(0.8, 1.2, 5 * config.scale_factors).tolist(),
+                np.linspace(0.1, 0.9, 8 * config.scale_factors).tolist(),
+                np.linspace(0.05, 0.95, 10 * config.scale_factors).tolist(),
+            ]
 
         if config.threshold == "variable":
             thresholds_per_level = [0.15, 0.2, 0.3, 0.4]
@@ -807,17 +806,16 @@ def downsample(image, scale_factor=0.5):
     return resized_image
 
 
-def calculate_patch_similarity(
-    patch1, patch2, ssd_match: bool = True, cross_corr_match: bool = False
-) -> float:
+def calculate_patch_similarity(patch1, patch2, ssd_match: bool = True, cross_corr_match: bool = False) -> float:
     def imshow(image, name: str):
         image = cv.resize(image, (512, 512), interpolation=cv.INTER_NEAREST)
         cv.imshow(name, image)
         cv.waitKey(0)
 
     def ssd_normalized(patch1, patch2):
-        diff = (patch1 - patch2).astype(np.int32) ** 2
-        return diff
+        diff = (patch1 - patch2).astype(np.float32) ** 2
+        normalized_diff = diff / (255**2)
+        return normalized_diff.mean()
 
     def cross_corr_normalized(patch1, patch2):
         # convert to float
@@ -876,4 +874,20 @@ def calculate_patch_similarity(
 
 
 if __name__ == "__main__":
-    task2("IconDataset", "Task2Dataset")
+    configs = [
+        Config(pyramid_levels=3, scale_factors=1, threshold=0.15, metric="ssd"),
+        Config(pyramid_levels=3, scale_factors=1, threshold=0.15, metric="mcc"),
+        Config(pyramid_levels=4, scale_factors=1, threshold=0.15, metric="mcc"),
+        Config(pyramid_levels=5, scale_factors=1, threshold=0.15, metric="mcc"),
+        # Config(pyramid_levels=4, scale_factors=4, threshold=0.15, metric="mcc"),
+        # Config(pyramid_levels=4, scale_factors=6, threshold=0.15, metric="mcc"),
+    ]
+
+    # # running multiple configs
+    for config in configs:
+        print("\n Running config: " + str(config))
+        task2("IconDataset", "Task2Dataset")
+
+    # # # running single config
+    # config = Config()
+    # task2("IconDataset", "Task2Dataset")
