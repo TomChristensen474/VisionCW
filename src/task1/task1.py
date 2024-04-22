@@ -29,7 +29,6 @@ class Task1Config:
     manysegs_average_segments: bool = True
     use_average_theta: bool = False
     faster_nearest_idx: bool = True
-    only_positive_rho: bool = True
 
     def is_debug(self, level: int) -> bool:
         return self.debug_level >= level
@@ -117,7 +116,7 @@ def task1(folderName: str) -> float:
         total_runtime += runtime
 
         print(
-            f"{image.stem} | Predicted angle: {predicted_angle:.2f}, Actual: {actual_angle}, Error: {error:.2f} | Runtime: {runtime:.2f}s"
+            f"{image.stem:<7} | Predicted angle: {predicted_angle:>6.2f}, Actual: {actual_angle:>3}, Error: {error:<4.2f} | Runtime: {runtime:.2f}s"
         )
 
     average_error = total_error / len(image_files)
