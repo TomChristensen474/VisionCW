@@ -13,11 +13,14 @@ from thinner import Thinner
 
 Image = np.ndarray
 
+from sys import gettrace
+DEBUGGER_ATTACHED = gettrace() is not None
+
 
 @dataclass
 class Task1Config:
     debug_level: int = 0
-    multithreaded: bool = True
+    multithreaded: bool = True if not DEBUGGER_ATTACHED else False
     cannyify_image: bool = False
     thin_image: bool = True
     refined_votes: bool = False
@@ -26,6 +29,7 @@ class Task1Config:
     manysegs_average_segments: bool = True
     use_average_theta: bool = False
     faster_nearest_idx: bool = True
+    only_positive_rho: bool = True
 
     def is_debug(self, level: int) -> bool:
         return self.debug_level >= level
@@ -209,7 +213,7 @@ class HoughLine:
 
         return y
 
-    def point_is_on_line(self, point: "Point") -> bool:
+    def point_is_on_line(self, point: Point) -> bool:
         theta = np.deg2rad(self.theta)
         predicted_rho = point.x * np.cos(theta) + point.y * np.sin(theta)
 
@@ -218,7 +222,7 @@ class HoughLine:
 
 @dataclass
 class HoughVote:
-    point: "Point"
+    point: Point
     rho: float
     theta: float
 
@@ -243,15 +247,15 @@ class HoughVotes:
     def avg_theta(self) -> float:
         return sum(vote.theta for vote in self.votes) / self.count
 
-    def avg_point(self) -> "Point":
+    def avg_point(self) -> Point:
         avg_x = sum(vote.point.x for vote in self.votes) / self.count
         avg_y = sum(vote.point.y for vote in self.votes) / self.count
         return Point(avg_x, avg_y)
 
-    def point_furthest_from(self, point: "Point") -> HoughVote:
+    def point_furthest_from(self, point: Point) -> HoughVote:
         return max(self.votes, key=lambda vote: point.squared_distance_from(vote.point))
 
-    def n_points_furthest_from(self, point: "Point", n: int, trim: int) -> "HoughVotes":
+    def n_points_furthest_from(self, point: Point, n: int, trim: int) -> "HoughVotes":
         # the segment edges can be funny, so trim says "ignore the 3 furthest points"
         # assuming they're in the "funny" region
         n += trim
@@ -269,7 +273,7 @@ class HoughVotes:
         votes = votes[trim:]
         return HoughVotes(votes)
 
-    def avg_point_furthest_from(self, point: "Point", n: int, trim: int, median: bool = False) -> HoughVote:
+    def avg_point_furthest_from(self, point: Point, n: int, trim: int, median: bool = False) -> HoughVote:
         n_points = self.n_points_furthest_from(point, n, trim)
         n_votes = n_points.votes
 
@@ -285,14 +289,14 @@ class HoughVotes:
 
             return HoughVote(avg_point, avg_rho, avg_theta)
 
-    def segment(self, intersection: "Point", n: int, trim: int) -> Segment:
+    def segment(self, intersection: Point, n: int, trim: int) -> Segment:
         avg_tip = self.avg_point_furthest_from(intersection, n, trim)
         avg_base = self.avg_point_furthest_from(avg_tip.point, n, trim)
 
         segment = Segment(avg_base.point.x, avg_base.point.y, avg_tip.point.x, avg_tip.point.y, self)
         return segment
 
-    def avg_segment(self, intersection: "Point") -> Segment:
+    def avg_segment(self, intersection: Point) -> Segment:
         tip = self.point_furthest_from(intersection)
 
         sorted_votes = sorted(self.votes, key=lambda vote: vote.point.squared_distance_from(tip.point))
@@ -352,12 +356,13 @@ class HoughAccumulator:
             # https://stackoverflow.com/a/26026189
             idx = arr.searchsorted(val, side="left")
             # note: this is much faster than abs().argmin(), but
-            # truncates instead of rounding. in practice this means
-            # get_idx(5.9999) will return the same as get_idx(5) if
-            # arr only has whole numbers.
+            # truncates up instead of rounding. in practice this
+            # means get_idx(5.0001) will return the same as get_idx(6)
+            # if arr only has whole numbers.
 
-            if idx >= len(arr):
-                idx = len(arr) - 1
+            if idx == len(arr):
+                idx -= 1
+
         else:
             idx = np.abs(arr - val).argmin()
 
@@ -369,7 +374,7 @@ class HoughAccumulator:
     def theta_idx(self, theta: float) -> int:
         return self.get_idx(theta, self.thetas)
 
-    def add_vote(self, point: "Point", rho: float, theta: float):
+    def add_vote(self, point: Point, rho: float, theta: float):
         rho_idx = self.rho_idx(rho)
         theta_idx = self.theta_idx(theta)
         vote = HoughVote(point, rho, theta)
@@ -478,14 +483,12 @@ class HoughAccumulator:
 
         # we got the N brightest spots. now look around them
         # and average the rhos/thetas of the points in the neighbourhood
-        NEIGHBOURHOOD_SIZE = 3
-        THRESHOLD_RATIO = 0.2  # only look at lines 0.5x as bright as the brightest line
+        NEIGHBOURHOOD_SIZE = 2
+        THRESHOLD_RATIO = 0.2  # only look at lines 0.2x as bright as the brightest line
 
         avg_local_maxima: list[HoughLocalMaximum] = []
         for local_maximum in n_local_maxima:
             votes = HoughVotes([])
-            # rho_idx = local_maximum.rho_idx
-            # theta_idx = local_maximum.theta_idx
 
             for rho_idx in range(
                 max(0, local_maximum.rho_idx - NEIGHBOURHOOD_SIZE),
@@ -583,7 +586,7 @@ def hough_segments(image: Image) -> list[Segment] | float:
     return segments
 
 
-def get_intersection_point(line1: HoughLine, line2: HoughLine) -> "Point":
+def get_intersection_point(line1: HoughLine, line2: HoughLine) -> Point:
     rho1, theta1 = line1.rho, np.deg2rad(line1.theta)
     rho2, theta2 = line2.rho, np.deg2rad(line2.theta)
 
@@ -709,7 +712,8 @@ def refine_votes(image: Image, votes: HoughVotes, n=100) -> HoughLocalMaximum:
 
     return most_voted_point
 
-ALL_HYPERPARAMETERS_MODE = True
+
+ALL_HYPERPARAMETERS_MODE = False
 
 if __name__ == "__main__":
     if ALL_HYPERPARAMETERS_MODE:
@@ -720,21 +724,23 @@ if __name__ == "__main__":
 
         for field in Task1Config.__dataclass_fields__.values():
             if field.name in hyperparam_combinations:
-                continue
+                continue  # skip debug_level and multithreaded
 
             if field.type == bool:
                 hyperparam_combinations[field.name] = [True, False]
                 continue
 
-            # n_average_segment_tips: int = 1
-            # trim_segment_edges: int = 0
             match field.name:
-                case "n_average_segment_tips": hyperparam_combinations[field.name] = [1, 5, 15]
-                case "trim_segment_edges": hyperparam_combinations[field.name] = [0, 5]
-                case _: raise ValueError*(f"what do I do with {field.name}")
+                case "n_average_segment_tips":
+                    hyperparam_combinations[field.name] = [1, 5, 15]
+                case "trim_segment_edges":
+                    hyperparam_combinations[field.name] = [0, 5]
+                case _:
+                    raise ValueError(f"what do I do with {field.name}")
 
-        # https://stackoverflow.com/a/61335465
+        # get all possible permutations: https://stackoverflow.com/a/61335465
         import itertools
+
         keys, values = zip(*hyperparam_combinations.items())
         hyperparam_permutations = [dict(zip(keys, v)) for v in itertools.product(*values)]
 
