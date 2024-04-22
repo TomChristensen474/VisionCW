@@ -557,23 +557,21 @@ def hough_segments(image: Image) -> list[Segment] | float:
     line2 = most_voted_points[1].hough_line()
     intersection = get_intersection_point(line1, line2)
 
-    n = config.n_average_segment_tips
-    trim = config.trim_segment_edges
     if config.manysegs_average_segments:
         segments = [
             most_voted_point.votes.avg_segment(intersection) for most_voted_point in most_voted_points
         ]
     else:
         segments = [
-            most_voted_point.votes.segment(intersection, n, trim) for most_voted_point in most_voted_points
+            most_voted_point.votes.segment(intersection, config.n_average_segment_tips, config.trim_segment_edges) for most_voted_point in most_voted_points
         ]
 
     if config.is_debug(1):
         # draw image and segment tip points
         dbg_img = image.copy()
         for segment in segments:
-            cv.circle(dbg_img, (int(segment.x1), int(segment.y1)), 2, (255, 255, 255), 1)
-            cv.circle(dbg_img, (int(segment.x2), int(segment.y2)), 2, (255, 255, 255), 1)
+            cv.circle(dbg_img, (int(segment.x1), int(segment.y1)), 2, (255, 255, 255), 2)
+            cv.circle(dbg_img, (int(segment.x2), int(segment.y2)), 2, (255, 255, 255), 2)
 
         cv.imshow("accumulator", dbg_img)
         cv.waitKey(0)
