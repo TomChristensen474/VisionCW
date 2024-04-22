@@ -12,7 +12,7 @@ import os
 import pandas as pd
 import ransac
 import re
-
+import time
 
 @dataclass
 class Point:
@@ -62,7 +62,7 @@ def print(s=""):
 def compare_descriptors_ssd(descriptor1, descriptor2):
     ssd_total = 0
     for i in range(len(descriptor1)):
-        ssd = (descriptor1[i] - descriptor2[i]) ** 2
+        ssd = ((descriptor1[i] - descriptor2[i]) ** 2) / (255 ** 2) # normalised square difference
         ssd_total += ssd
     return ssd_total
 
@@ -73,7 +73,7 @@ best matching points which are sorted based on lowest difference metric (e.g. lo
 """
 
 
-def descriptor_point_match(described_template_keypoints, described_image_keypoints, ssd_threshold=120000, R=0.8):
+def descriptor_point_match(described_template_keypoints, described_image_keypoints, ssd_threshold, R):
     matches: list[TemplateImageKeypointMatch] = []
     # for each template keypoint
     for i, template_descriptor in enumerate(described_template_keypoints.descriptors):
@@ -102,12 +102,6 @@ def descriptor_point_match(described_template_keypoints, described_image_keypoin
                 )
 
                 matches.append(TemplateImageKeypointMatch(min_ssd, template_point, image_point))
-
-        # else:
-        #     raise ValueError("error")
-
-    # if len(matches) < 4:
-    #     raise ValueError("Need at least 4 matches")
 
     # sort the best matches based on the lowest ssd
     matches.sort(key=lambda x: x.match_ssd)
@@ -175,7 +169,7 @@ def run(
     template,
     debug=False,
     octave_layers=3,
-    ssd_threshold=1200000,
+    ssd_threshold=10,
     R=0.8,
     distance_threshold=15,
     iterations=200,
@@ -217,8 +211,8 @@ def run(
                 markerSize=10,
                 thickness=1,
             )
+        print(str(len(matches)))
 
-    # print(str(len(matches)))
     # 3. Threshold to identify matches -> need minimum 4 for homography
     if len(matches) < 4:
         return False, len(matches), []
@@ -364,16 +358,17 @@ def task3(folderName: str):
                 template = cv.imread(str(icon_dataset_path / icon))
                 icon_name = re.split("(\d+)-(.+)\.png", icon)[2]
                 clean_image_copy = image.copy()  # creating clean copy of image for displaying
+                debug = False
                 match, num_matches, bbox = run(
                     clean_image_copy,
                     template,
-                    debug=False,
-                    octave_layers=3,
-                    ssd_threshold=120000,
-                    R=0.8,
-                    distance_threshold=15,
-                    iterations=200,
-                    min_inliers=10,
+                    debug=debug,
+                    octave_layers=octave_layers,
+                    ssd_threshold=ssd_threshold,
+                    R=R,
+                    distance_threshold=distance_threshold,
+                    iterations=iterations,
+                    min_inliers=min_inliers,
                 )
 
                 if icon_name in icons_in_image.keys():  # icon is in image
@@ -389,7 +384,8 @@ def task3(folderName: str):
                         icons_in_image[icon_name].bottom,
                         icons_in_image[icon_name].right,
                     ]
-                    draw_axis_bbox(clean_image_copy, ground_truth_bbox, (0, 255, 0))
+                    if debug:
+                        draw_axis_bbox(clean_image_copy, ground_truth_bbox, (0, 255, 0))
 
                     iou = calc_iou(icons_in_image[icon_name], bbox)
 
@@ -461,31 +457,30 @@ def task3(folderName: str):
     # octave_layers = np.linspace(3, 9, 4)  # 3, 5, 7, 9
     # ssd_threshold = np.linspace(10000, 150000, 15)
     # R = np.linspace(0.5, 0.95, 10)
-    # distance_threshold = np.linspace(1, 50, 20)
+    # distance_threshold = np.linspace(2, 30, 10)
     # iterations = np.linspace(100, 1000, 10)
-    # # maxRatio = np.linspace(0.5, 0.95, 10) # not used at the moment
+    # maxRatio = np.linspace(0.5, 0.95, 10) # not used at the moment
     # min_inliers = np.linspace(3, 25, 22)
 
     # # for testing purposes
-    # template_path = icon_dataset_path / "48-hospital.png"
+    # template_path = icon_dataset_path / "01-lighthouse.png"
     # image_path = images_path / "test_image_1.png"
     # template = cv.imread(str(template_path))
     # image = cv.imread(str(image_path))
-    # run(image, template, debug=True octave_layers=3, ssd_threshold=120000, R=0.8, distance_threshold=15, iterations=200, min_inliers=10)
+    # run(image, template, debug=True, octave_layers=5, ssd_threshold=5, R=0.4, distance_threshold=2, iterations=200, min_inliers=4)
 
-    octave_layers = [3]
-    # ssd_threshold=1200000,
-    R = [0.8]
-    # distance_threshold=15,
-    iterations = [200]
-    maxRatio = [0.8]
-    min_inliers = [10]
+    octave_layers = [5]
+    ssd_threshold=[4, 5, 6]
+    R = [0.2, 0.4]
+    distance_threshold=[2.5, 3, 3.5, 4]
+    iterations = [50]
+    # maxRatio = [0.8]
+    min_inliers = [7]
 
-    ssd_threshold = np.linspace(10000, 150000, 5)
-    distance_threshold = np.linspace(1, 25, 5)
 
-    with open("task3.csv", "w", newline="") as csvfile:
+    with open("task3.csv", "a", newline="") as csvfile:
         fieldnames = [
+            "when",
             "param_set",
             "octave_layers",
             "ssd_threshold",
@@ -499,7 +494,7 @@ def task3(folderName: str):
             "fnr",
         ]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
+        # writer.writeheader()
         param_set = 0
         for octave_layer in octave_layers:
             for ssd in ssd_threshold:
@@ -507,6 +502,8 @@ def task3(folderName: str):
                     for distance in distance_threshold:
                         for iteration in iterations:
                             for min_inlier in min_inliers:
+                                # print(str(param_set) + " " + str(octave_layer) + " " + str(ssd) + " " + str(r) + " " + str(distance) + " " + str(iteration) + " " + str(min_inlier) + "\n\n")
+                                print(f"octave_layers: {octave_layer}, ssd_threshold: {ssd}, R: {r}, distance_threshold: {distance}, iterations: {iteration}, min_inliers: {min_inlier}")
                                 param_set += 1
                                 accuracy, tpr, fpr, fnr = feature_match(
                                     images_path,
@@ -519,9 +516,10 @@ def task3(folderName: str):
                                     iteration,
                                     min_inlier,
                                 )
+                                when = time.strftime("%Y-%m-%d %H:%M:%S")
                                 writer.writerow(
                                     {
-                                        "param_set": param_set,
+                                        "when": when,
                                         "octave_layers": octave_layer,
                                         "ssd_threshold": ssd,
                                         "R": r,
@@ -534,6 +532,7 @@ def task3(folderName: str):
                                         "fnr": fnr,
                                     }
                                 )
+                                csvfile.flush()
 
 
 if __name__ == "__main__":
