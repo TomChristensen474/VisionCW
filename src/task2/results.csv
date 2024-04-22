@@ -1,0 +1,10 @@
+when,accuracy,TPR,FPR,FNR,avg_IoU,avg_runtime,pyramid_levels,scale_factors,threshold,metric,cv_bbox_method,filter_nested
+2024-04-22 09:19:33,0.85,0.00,0.07,1.00,0.01,1.65,5,variable,variable,ssd,False,True
+2024-04-22 09:34:42,0.92,0.13,0.00,0.87,0.98,8.53,5,variable,variable,mcc,False,True
+2024-04-22 10:06:52,0.90,0.00,0.01,1.00,0.03,16.29,3,1,0.15,ssd,False,True
+2024-04-22 10:18:11,0.91,0.00,0.00,1.00,0,10.06,2,variable,variable,ssd,False,True
+2024-04-22 10:34:46,0.91,0.00,0.01,1.00,0.03,49.72,3,variable,variable,ssd,False,True
+2024-04-22 10:37:16,0.82,0.03,0.10,0.97,0.20,7.43,4,variable,variable,ssd,False,True
+2024-04-22 10:37:52,0.85,0.00,0.07,1.00,0.01,1.80,5,variable,variable,ssd,False,True
+2024-04-22 10:40:41,0.92,0.13,0.00,0.87,0.98,8.45,5,variable,variable,mcc,False,True
+2024-04-22 10:56:42,1.00,0.99,0.00,0.01,0.96,33.19,4,variable,variable,mcc,False,True
