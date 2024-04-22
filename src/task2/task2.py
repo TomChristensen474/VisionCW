@@ -127,6 +127,14 @@ class Rectangle:
             int(self.y2 + pos_y),
         )
 
+        if expanded.x2 - expanded.x1 > max_x:
+            expanded.x1 = 0
+            expanded.x2 = max_x
+        if expanded.y2 - expanded.y1 > max_y:
+            expanded.y1 = 0
+            expanded.y2 = max_y
+
+
         # assert 0 <= x1 < x2 <= scaled_image.shape[1]
         assert 0 <= expanded.x1 < expanded.x2 <= max_x
         assert 0 <= expanded.y1 < expanded.y2 <= max_y
@@ -355,7 +363,7 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         f"Accuracy: {total_accuracy * 100:.2f}% TPR: {total_tpr * 100:.2f}% FPR: {total_fpr * 100:.2f}% FNR: {total_fnr * 100:.2f}%"
     )
 
-    average_iou = sum(all_ious) / len(all_ious)
+    average_iou = sum(all_ious) / len(all_ious) if len(all_ious) > 0 else 0
     print(f"Average IoU: {average_iou * 100:.2f}%")
 
     average_runtime = sum(runtimes) / len(runtimes)
@@ -531,7 +539,7 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
             ]
 
         if config.threshold == "variable":
-            thresholds_per_level = [0.15, 0.2, 0.3, 0.4]
+            thresholds_per_level = [0.15, 0.2, 0.3, 0.4, 0.5]
         else:
             thresholds_per_level = [config.threshold] * config.pyramid_levels
 
@@ -825,14 +833,19 @@ def calculate_patch_similarity(patch1, patch2, ssd_match: bool = True, cross_cor
         # normalize
         def normalise_patch(patch):
             patch -= patch.min()
-            patch *= 255 / patch.max()
+            if patch.max() != 0:
+                patch *= 255 / patch.max()
             return patch
 
         patch1_norm = normalise_patch(patch1)
         patch2_norm = normalise_patch(patch2)
 
-        patch1_hat = (patch1_norm - patch1_norm.mean()) / patch1_norm.std()
-        patch2_hat = (patch2_norm - patch2_norm.mean()) / patch2_norm.std()
+        if patch1_norm.std() == 0 or patch2_norm.std() == 0:
+            patch1_hat = patch1_norm - patch1_norm.mean()
+            patch2_hat = patch2_norm - patch2_norm.mean()
+        else:
+            patch1_hat = (patch1_norm - patch1_norm.mean()) / patch1_norm.std()
+            patch2_hat = (patch2_norm - patch2_norm.mean()) / patch2_norm.std()
 
         diff = patch1_hat * patch2_hat
 
