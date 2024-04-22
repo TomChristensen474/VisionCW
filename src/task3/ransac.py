@@ -33,7 +33,7 @@ class Ransac:
 
         # Solve the homogeneous linear system using SVD
         U, D, Vt = np.linalg.svd(A)
-        H = Vt[-1, :].reshape(3, 3)
+        H = Vt[-1, :].reshape(3, 3).astype(np.float32)
 
         # Normalize the solution to ensure H[2, 2] = 1
         H = H / H[2, 2]
@@ -70,9 +70,12 @@ class Ransac:
 
         sampled_points, unsampled_points = self.sample_points(points, 4)
         homography = calc_homography(sampled_points)
-        transformed_points = apply_homography(unsampled_points, homography)
+        if len(unsampled_points) > 0:
+            transformed_points = apply_homography(unsampled_points, homography)
+        else:
+            transformed_points = []    
 
-        def calculate_distance_between_points(point1: Point, point2: Point) -> float:
+        def calculate_distance_between_points(point1: Point, point2: Point) -> np.float32:
             return np.sqrt((point1.x - point2.x) ** 2 + (point1.y - point2.y) ** 2)
         
         for index, point in enumerate(transformed_points):
@@ -138,14 +141,13 @@ class Ransac:
 
     def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100, maxRatio=0.8) -> tuple[Homography, list[PointMatch], list[PointMatch], list[PointMatch]]:
 
-        best_inlier_ratio = 0
+        # best_inlier_ratio = 0
         best_inlier_count = 0
         best_outliers = []
         best_inliers = []
         best_homography = None
 
         for i in range(iterations):
-            # sampled_points = self.sample_points(points)
             inliers, outliers, homography = self.calculate_homography_outliers(points)
             # inlier_ratio = len(inliers) / len(points)
             inlier_count = len(inliers)
@@ -156,20 +158,18 @@ class Ransac:
                 best_outliers = outliers
                 best_homography = homography
 
-
             # if inlier_ratio > best_inlier_ratio and inlier_ratio >= (1 - maxRatio) and np.random.uniform(0,1) > 0.8:
             #     best_inlier_ratio = inlier_ratio
             #     best_inliers = inliers
             #     best_outliers = outliers
             #     best_homography = homography
         
-
         if not best_homography:  # if empty arry or best line is none
             raise ValueError("no homography found")
         
-        # best_homography, sampled_inliers = self.recalc_homography_from_sampled_inliers(best_inliers)
-
-        # return best_homography, best_inliers, best_outliers, sampled_inliers
-
         return self.refine_homography(best_inliers), best_inliers, best_outliers, []
+
+        # best_homography, sampled_inliers = self.recalc_homography_from_sampled_inliers(best_inliers)
+        # return best_homography, best_inliers, best_outliers, sampled_inliers
+    
         # return best_homography, best_inliers, best_outliers, []
