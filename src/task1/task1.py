@@ -540,11 +540,7 @@ def hough_segments(image: Image) -> list[Segment] | float:
     assert len(most_voted_points) == 2, f"Expected 2 local maxima, got {len(most_voted_points)}"
 
     if config.refined_votes:
-        most_voted_points = [refine_votes(image, point.votes) for point in most_voted_points]
-        # theta1 = refine_votes(image, most_voted_points[0].votes)
-        # theta2 = refine_votes(image, most_voted_points[1].votes)
-        # print(theta1, theta2, abs(theta1 - theta2))
-        # return abs(theta1 - theta2)
+        most_voted_points = [refine_votes(point.votes) for point in most_voted_points]
 
     if config.is_debug(1):
         # render accumulator and most voted points
@@ -552,7 +548,7 @@ def hough_segments(image: Image) -> list[Segment] | float:
         for point in most_voted_points:
             rho_idx = accumulator.rho_idx(point.avg_rho)
             theta_idx = accumulator.theta_idx(point.avg_theta)
-            cv.circle(accumulator_img, (int(theta_idx), int(rho_idx)), 5, (255, 255, 255), 5)
+            cv.circle(accumulator_img, (int(theta_idx), int(rho_idx)), 3, (255, 255, 255), 1)
         cv.imshow("accumulator", accumulator_img)
         cv.waitKey(0)
 
@@ -670,14 +666,16 @@ def get_angle_from_votes(votes1: HoughVotes, votes2: HoughVotes) -> float:
     return get_angle_from_vectors(segment1, segment2)
 
 
-def refine_votes(image: Image, votes: HoughVotes, n=100) -> HoughLocalMaximum:
+def refine_votes(votes: HoughVotes, n=100) -> HoughLocalMaximum:
     thetas = [vote.theta for vote in votes.votes]
     max_theta = max(thetas)
     min_theta = min(thetas)
+    assert min_theta != max_theta
 
     rhos = [vote.rho for vote in votes.votes]
     max_rho = max(rhos)
     min_rho = min(rhos)
+    assert min_rho != max_rho
 
     thetas = np.linspace(min_theta, max_theta, n)
     rhos = np.linspace(min_rho, max_rho, n)
