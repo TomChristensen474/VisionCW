@@ -18,14 +18,14 @@ Image = np.ndarray
 class Task1Config:
     debug_level: int = 0
     multithreaded: bool = True
-    cannyify_image: bool = True
-    thin_image: bool = False
+    cannyify_image: bool = False
+    thin_image: bool = True
     refined_votes: bool = False
     n_average_segment_tips: int = 1
     trim_segment_edges: int = 0
     manysegs_average_segments: bool = True
     use_average_theta: bool = False
-    faster_nearest_idx: bool = False
+    faster_nearest_idx: bool = True
 
     def is_debug(self, level: int) -> bool:
         return self.debug_level >= level
@@ -136,8 +136,9 @@ def get_angle(image_path: Path) -> float:
         # run canny on the image as a preprocessing step
         image = cannyify_image(image)
     elif config.thin_image:
+        _, binary_image = cv.threshold(image, 120, 255, cv.THRESH_BINARY)
         thinner = Thinner()
-        image = thinner.thin_image(image)
+        image = thinner.thin_image(binary_image)
 
     if config.is_debug(1):
         render(image)
@@ -354,6 +355,9 @@ class HoughAccumulator:
             # truncates instead of rounding. in practice this means
             # get_idx(5.9999) will return the same as get_idx(5) if
             # arr only has whole numbers.
+
+            if idx >= len(arr):
+                idx = len(arr) - 1
         else:
             idx = np.abs(arr - val).argmin()
 
@@ -485,12 +489,12 @@ class HoughAccumulator:
 
             for rho_idx in range(
                 max(0, local_maximum.rho_idx - NEIGHBOURHOOD_SIZE),
-                min(local_maximum.rho_idx + NEIGHBOURHOOD_SIZE, len(self.rhos) - 1),
+                min(local_maximum.rho_idx + NEIGHBOURHOOD_SIZE, len(self.rhos)),
             ):
 
                 for theta_idx in range(
                     max(0, local_maximum.theta_idx - NEIGHBOURHOOD_SIZE),
-                    min(local_maximum.theta_idx + NEIGHBOURHOOD_SIZE, len(self.thetas) - 1),
+                    min(local_maximum.theta_idx + NEIGHBOURHOOD_SIZE, len(self.thetas)),
                 ):
 
                     if self.matrix[rho_idx][theta_idx].count / local_maximum.votes.count < THRESHOLD_RATIO:
@@ -705,6 +709,44 @@ def refine_votes(image: Image, votes: HoughVotes, n=100) -> HoughLocalMaximum:
 
     return most_voted_point
 
+ALL_HYPERPARAMETERS_MODE = True
 
 if __name__ == "__main__":
-    task1("Task1Dataset")
+    if ALL_HYPERPARAMETERS_MODE:
+        hyperparam_combinations = {
+            "debug_level": [0],
+            "multithreaded": [True],
+        }
+
+        for field in Task1Config.__dataclass_fields__.values():
+            if field.name in hyperparam_combinations:
+                continue
+
+            if field.type == bool:
+                hyperparam_combinations[field.name] = [True, False]
+                continue
+
+            # n_average_segment_tips: int = 1
+            # trim_segment_edges: int = 0
+            match field.name:
+                case "n_average_segment_tips": hyperparam_combinations[field.name] = [1, 5, 15]
+                case "trim_segment_edges": hyperparam_combinations[field.name] = [0, 5]
+                case _: raise ValueError*(f"what do I do with {field.name}")
+
+        # https://stackoverflow.com/a/61335465
+        import itertools
+        keys, values = zip(*hyperparam_combinations.items())
+        hyperparam_permutations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+
+        for i, permutation in enumerate(hyperparam_permutations):
+            # invalid/redundant permutations
+            if permutation["cannyify_image"] and permutation["thin_image"]:
+                continue
+
+            print(f"Permutation {i+1}/{len(hyperparam_permutations)}: {permutation}")
+
+            config = Task1Config(**permutation)
+            task1("Task1Dataset")
+
+    else:
+        task1("Task1Dataset")
