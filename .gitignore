@@ -2,3 +2,4 @@
 __pycache__
 profiler
 .vscode
+.DS_Store
