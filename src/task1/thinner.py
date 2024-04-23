@@ -17,19 +17,15 @@ class Thinner:
             np.array([[0, 0, 0],
                       [0, 1, 0],
                       [1, 1, 1]], dtype=np.uint8),
-
             np.array([[0, 0, 0],
                       [1, 1, 0],
                       [0, 1, 0]], dtype=np.uint8),
-
-            np.array([[0, 1, 0],
-                      [0, 1, 1],
+            np.array([[0, 1, 1],
+                      [0, 1, 0],
                       [0, 0, 0]], dtype=np.uint8),
-
-            np.array([[0, 1, 0],
-                      [1, 1, 0],
+            np.array([[1, 1, 0],
+                      [0, 1, 0],
                       [0, 0, 0]], dtype=np.uint8),
-                      
             np.array([[0, 0, 0],
                       [0, 1, 1],
                       [0, 1, 0]], dtype=np.uint8),
@@ -55,7 +51,7 @@ class Thinner:
 
 
 if __name__ == "__main__":
-    image = cv2.imread('datasets/Task1Dataset/image1.png')
+    image = cv2.imread('datasets/Task1Dataset/image2.png')
     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, binary_image = cv2.threshold(gray_image, 120, 255, cv2.THRESH_BINARY)
 
