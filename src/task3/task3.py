@@ -469,13 +469,13 @@ def task3(folderName: str):
     # image = cv.imread(str(image_path))
     # run(image, template, debug=True, octave_layers=5, ssd_threshold=5, R=0.4, distance_threshold=2, iterations=200, min_inliers=4)
 
-    octave_layers = [5]
-    ssd_threshold=[4, 5, 6]
-    R = [0.2, 0.4]
-    distance_threshold=[2.5, 3, 3.5, 4]
-    iterations = [50]
+    octave_layers = [3]
+    ssd_threshold=[2]
+    R = [0.4]
+    distance_threshold=[2]
+    iterations = [200]
     # maxRatio = [0.8]
-    min_inliers = [7]
+    min_inliers = [6]
 
 
     with open("task3.csv", "a", newline="") as csvfile:
