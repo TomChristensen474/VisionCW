@@ -478,7 +478,7 @@ def task3(folderName: str):
     min_inliers = [6]
 
 
-    with open("task3.csv", "a", newline="") as csvfile:
+    with open("results.csv", "a", newline="") as csvfile:
         fieldnames = [
             "when",
             "param_set",

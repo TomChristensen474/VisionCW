@@ -21,7 +21,7 @@ Image = np.ndarray
 @dataclass
 class Config:
     debug_level: int = 0
-    pyramid_levels: int = 4
+    pyramid_levels: int = 2
     scale_factors: int | Literal["variable"] = "variable"
     threshold: float | Literal["variable"] = "variable"
     metric: Literal["mcc", "ssd"] = "mcc"
@@ -32,7 +32,7 @@ class Config:
         return self.debug_level >= level
 
 
-config = Config()
+# config = Config()
 
 
 def print(s=""):
@@ -126,6 +126,14 @@ class Rectangle:
             int(self.x2 + pos_x),
             int(self.y2 + pos_y),
         )
+
+        if expanded.x2 - expanded.x1 > max_x:
+            expanded.x1 = 0
+            expanded.x2 = max_x
+        if expanded.y2 - expanded.y1 > max_y:
+            expanded.y1 = 0
+            expanded.y2 = max_y
+
 
         # assert 0 <= x1 < x2 <= scaled_image.shape[1]
         assert 0 <= expanded.x1 < expanded.x2 <= max_x
@@ -326,9 +334,7 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         fnr = len(false_negatives) / len(positives)
         accuracy = (len(true_positives) + len(true_negatives)) / len(all_labels)
 
-        print(
-            f"Accuracy: {accuracy * 100:.3}% TPR: {tpr * 100:.3}% FPR: {fpr * 100:.3}% FNR: {fnr * 100:.3}%"
-        )
+        print(f"Accuracy: {accuracy * 100:.3}% TPR: {tpr * 100:.3}% FPR: {fpr * 100:.3}% FNR: {fnr * 100:.3}%")
 
         print("True positives: (correct matches)")
         for label in true_positives:
@@ -357,7 +363,7 @@ def task2(icon_folder_name: str, test_folder_name: str) -> tuple[float, float, f
         f"Accuracy: {total_accuracy * 100:.2f}% TPR: {total_tpr * 100:.2f}% FPR: {total_fpr * 100:.2f}% FNR: {total_fnr * 100:.2f}%"
     )
 
-    average_iou = sum(all_ious) / len(all_ious)
+    average_iou = sum(all_ious) / len(all_ious) if len(all_ious) > 0 else 0
     print(f"Average IoU: {average_iou * 100:.2f}%")
 
     average_runtime = sum(runtimes) / len(runtimes)
@@ -484,9 +490,7 @@ def render(
         match_width = int(image.shape[1] / 2)
         match_height = int(image.shape[0] / 2)
 
-        icons = [
-            cv.resize(icon, (match_width, match_height), interpolation=cv.INTER_NEAREST) for icon in icons
-        ]
+        icons = [cv.resize(icon, (match_width, match_height), interpolation=cv.INTER_NEAREST) for icon in icons]
         icons = np.hstack(icons)
 
         search_areas = [
@@ -503,9 +507,7 @@ def render(
         # just resize and hstack the image, search area and icon
 
         icon = cv.resize(icons[0], (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST)
-        search_area = cv.resize(
-            search_areas[0], (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST
-        )
+        search_area = cv.resize(search_areas[0], (image.shape[1], image.shape[0]), interpolation=cv.INTER_NEAREST)
 
         image = np.hstack((image, search_area, icon))
 
@@ -525,14 +527,19 @@ def find_matching_icons_2(image, icons: list[tuple[str, GaussianPyramid]]) -> li
                 np.linspace(0.95, 1.05, 3).tolist(),
                 np.linspace(0.8, 1.2, 5).tolist(),
                 np.linspace(0.1, 0.9, 8).tolist(),
+                np.linspace(0.05, 0.95, 10).tolist(),
             ]
         else:
-            scale_factor_multipliers_per_level = (
-                [np.linspace(0.1, 1.0, config.scale_factors).tolist()] * config.pyramid_levels,
-            )
+            scale_factor_multipliers_per_level = [
+                [1.0],
+                np.linspace(0.95, 1.05, 3 * config.scale_factors).tolist(),
+                np.linspace(0.8, 1.2, 5 * config.scale_factors).tolist(),
+                np.linspace(0.1, 0.9, 8 * config.scale_factors).tolist(),
+                np.linspace(0.05, 0.95, 10 * config.scale_factors).tolist(),
+            ]
 
         if config.threshold == "variable":
-            thresholds_per_level = [0.15, 0.2, 0.3, 0.4]
+            thresholds_per_level = [0.15, 0.2, 0.3, 0.4, 0.5]
         else:
             thresholds_per_level = [config.threshold] * config.pyramid_levels
 
@@ -807,17 +814,16 @@ def downsample(image, scale_factor=0.5):
     return resized_image
 
 
-def calculate_patch_similarity(
-    patch1, patch2, ssd_match: bool = True, cross_corr_match: bool = False
-) -> float:
+def calculate_patch_similarity(patch1, patch2, ssd_match: bool = True, cross_corr_match: bool = False) -> float:
     def imshow(image, name: str):
         image = cv.resize(image, (512, 512), interpolation=cv.INTER_NEAREST)
         cv.imshow(name, image)
         cv.waitKey(0)
 
     def ssd_normalized(patch1, patch2):
-        diff = (patch1 - patch2).astype(np.int32) ** 2
-        return diff
+        diff = (patch1 - patch2).astype(np.float32) ** 2
+        normalized_diff = diff / (255**2)
+        return normalized_diff.mean()
 
     def cross_corr_normalized(patch1, patch2):
         # convert to float
@@ -827,14 +833,19 @@ def calculate_patch_similarity(
         # normalize
         def normalise_patch(patch):
             patch -= patch.min()
-            patch *= 255 / patch.max()
+            if patch.max() != 0:
+                patch *= 255 / patch.max()
             return patch
 
         patch1_norm = normalise_patch(patch1)
         patch2_norm = normalise_patch(patch2)
 
-        patch1_hat = (patch1_norm - patch1_norm.mean()) / patch1_norm.std()
-        patch2_hat = (patch2_norm - patch2_norm.mean()) / patch2_norm.std()
+        if patch1_norm.std() == 0 or patch2_norm.std() == 0:
+            patch1_hat = patch1_norm - patch1_norm.mean()
+            patch2_hat = patch2_norm - patch2_norm.mean()
+        else:
+            patch1_hat = (patch1_norm - patch1_norm.mean()) / patch1_norm.std()
+            patch2_hat = (patch2_norm - patch2_norm.mean()) / patch2_norm.std()
 
         diff = patch1_hat * patch2_hat
 
@@ -876,4 +887,20 @@ def calculate_patch_similarity(
 
 
 if __name__ == "__main__":
-    task2("IconDataset", "Task2Dataset")
+    configs = [
+        Config(pyramid_levels=3, scale_factors=1, threshold=0.15, metric="ssd"),
+        Config(pyramid_levels=3, scale_factors=1, threshold=0.15, metric="mcc"),
+        Config(pyramid_levels=4, scale_factors=1, threshold=0.15, metric="mcc"),
+        Config(pyramid_levels=5, scale_factors=1, threshold=0.15, metric="mcc"),
+        # Config(pyramid_levels=4, scale_factors=4, threshold=0.15, metric="mcc"),
+        # Config(pyramid_levels=4, scale_factors=6, threshold=0.15, metric="mcc"),
+    ]
+
+    # # running multiple configs
+    for config in configs:
+        print("\n Running config: " + str(config))
+        task2("IconDataset", "Task2Dataset")
+
+    # # # running single config
+    # config = Config()
+    # task2("IconDataset", "Task2Dataset")
