@@ -821,9 +821,14 @@ def calculate_patch_similarity(patch1, patch2, ssd_match: bool = True, cross_cor
         cv.waitKey(0)
 
     def ssd_normalized(patch1, patch2):
-        diff = (patch1 - patch2).astype(np.float32) ** 2
-        normalized_diff = diff / (255**2)
-        return normalized_diff.mean()
+        patch1 = patch1.astype(np.float32).mean(axis=2)
+        patch2 = patch2.astype(np.float32).mean(axis=2)
+
+        diff = (patch1 - patch2) ** 2
+
+        mean_diff = diff.mean()
+        normalised_diff = mean_diff / 255**2
+        return normalised_diff
 
     def cross_corr_normalized(patch1, patch2):
         # convert to float
