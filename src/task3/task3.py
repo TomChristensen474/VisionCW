@@ -107,16 +107,18 @@ def descriptor_point_match(described_template_keypoints, described_image_keypoin
     matches.sort(key=lambda x: x.match_ssd)
 
     # return matches
-
+    
     unique_matches = []
     source_points = []
     destination_points = []
     for match in matches:
-        if match.template_point not in source_points:
-            if match.image_point not in destination_points:
+        template_point = (match.template_point.x,match.template_point.y)
+        image_point = (match.image_point.x,match.image_point.y)
+        if template_point not in source_points:
+            if image_point not in destination_points:
                 unique_matches.append(match)
-                source_points.append(match.template_point)
-                destination_points.append(match.image_point)
+                source_points.append(template_point)
+                destination_points.append(image_point)
 
     return unique_matches
 
@@ -161,6 +163,10 @@ def apply_homography_transform(H: Homography, points: npt.NDArray[np.uint8]) -> 
         point = Point(int(point[0]), int(point[1]))
         transformed_points.append(point)
 
+    # print("here")
+    # for p in transformed_points:
+    #     print(p)
+    # exit()
     return transformed_points
 
 
@@ -243,7 +249,6 @@ def run(
 
     # 5. Apply homography to get bounding box for labelling
     bbox = apply_homography_transform(homography, template_corners)
-    # print(bbox)
     img_copy = image.copy()
     sampled_inliers_img = image.copy()
 
@@ -462,77 +467,77 @@ def task3(folderName: str):
     # maxRatio = np.linspace(0.5, 0.95, 10) # not used at the moment
     # min_inliers = np.linspace(3, 25, 22)
 
-    # # for testing purposes
-    # template_path = icon_dataset_path / "01-lighthouse.png"
-    # image_path = images_path / "test_image_1.png"
-    # template = cv.imread(str(template_path))
-    # image = cv.imread(str(image_path))
-    # run(image, template, debug=True, octave_layers=5, ssd_threshold=5, R=0.4, distance_threshold=2, iterations=200, min_inliers=4)
+    # for testing purposes 
+    template_path = icon_dataset_path / "15-barn.png"
+    image_path = images_path / "test_image_1.png"
+    template = cv.imread(str(template_path))
+    image = cv.imread(str(image_path))
+    run(image, template, debug=True, octave_layers=5, ssd_threshold=5, R=0.4, distance_threshold=2, iterations=200, min_inliers=4)
 
-    octave_layers = [3]
-    ssd_threshold=[2]
-    R = [0.4]
-    distance_threshold=[2]
-    iterations = [200]
-    # maxRatio = [0.8]
-    min_inliers = [6]
+    # octave_layers = [3]
+    # ssd_threshold=[2]
+    # R = [0.4]
+    # distance_threshold=[2]
+    # iterations = [200]
+    # # maxRatio = [0.8]
+    # min_inliers = [6]
 
 
-    with open("results.csv", "a", newline="") as csvfile:
-        fieldnames = [
-            "when",
-            "param_set",
-            "octave_layers",
-            "ssd_threshold",
-            "R",
-            "distance_threshold",
-            "iterations",
-            "min_inliers",
-            "accuracy",
-            "tpr",
-            "fpr",
-            "fnr",
-        ]
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        # writer.writeheader()
-        param_set = 0
-        for octave_layer in octave_layers:
-            for ssd in ssd_threshold:
-                for r in R:
-                    for distance in distance_threshold:
-                        for iteration in iterations:
-                            for min_inlier in min_inliers:
-                                # print(str(param_set) + " " + str(octave_layer) + " " + str(ssd) + " " + str(r) + " " + str(distance) + " " + str(iteration) + " " + str(min_inlier) + "\n\n")
-                                print(f"octave_layers: {octave_layer}, ssd_threshold: {ssd}, R: {r}, distance_threshold: {distance}, iterations: {iteration}, min_inliers: {min_inlier}")
-                                param_set += 1
-                                accuracy, tpr, fpr, fnr = feature_match(
-                                    images_path,
-                                    annotations_path,
-                                    icon_dataset_path,
-                                    octave_layer,
-                                    ssd,
-                                    r,
-                                    distance,
-                                    iteration,
-                                    min_inlier,
-                                )
-                                when = time.strftime("%Y-%m-%d %H:%M:%S")
-                                writer.writerow(
-                                    {
-                                        "when": when,
-                                        "octave_layers": octave_layer,
-                                        "ssd_threshold": ssd,
-                                        "R": r,
-                                        "distance_threshold": distance,
-                                        "iterations": iteration,
-                                        "min_inliers": min_inlier,
-                                        "accuracy": accuracy,
-                                        "tpr": tpr,
-                                        "fpr": fpr,
-                                        "fnr": fnr,
-                                    }
-                                )
-                                csvfile.flush()
+    # with open("results.csv", "a", newline="") as csvfile:
+    #     fieldnames = [
+    #         "when",
+    #         "param_set",
+    #         "octave_layers",
+    #         "ssd_threshold",
+    #         "R",
+    #         "distance_threshold",
+    #         "iterations",
+    #         "min_inliers",
+    #         "accuracy",
+    #         "tpr",
+    #         "fpr",
+    #         "fnr",
+    #     ]
+    #     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    #     # writer.writeheader()
+    #     param_set = 0
+    #     for octave_layer in octave_layers:
+    #         for ssd in ssd_threshold:
+    #             for r in R:
+    #                 for distance in distance_threshold:
+    #                     for iteration in iterations:
+    #                         for min_inlier in min_inliers:
+    #                             # print(str(param_set) + " " + str(octave_layer) + " " + str(ssd) + " " + str(r) + " " + str(distance) + " " + str(iteration) + " " + str(min_inlier) + "\n\n")
+    #                             print(f"octave_layers: {octave_layer}, ssd_threshold: {ssd}, R: {r}, distance_threshold: {distance}, iterations: {iteration}, min_inliers: {min_inlier}")
+    #                             param_set += 1
+    #                             accuracy, tpr, fpr, fnr = feature_match(
+    #                                 images_path,
+    #                                 annotations_path,
+    #                                 icon_dataset_path,
+    #                                 octave_layer,
+    #                                 ssd,
+    #                                 r,
+    #                                 distance,
+    #                                 iteration,
+    #                                 min_inlier,
+    #                             )
+    #                             when = time.strftime("%Y-%m-%d %H:%M:%S")
+    #                             writer.writerow(
+    #                                 {
+    #                                     "when": when,
+    #                                     "octave_layers": octave_layer,
+    #                                     "ssd_threshold": ssd,
+    #                                     "R": r,
+    #                                     "distance_threshold": distance,
+    #                                     "iterations": iteration,
+    #                                     "min_inliers": min_inlier,
+    #                                     "accuracy": accuracy,
+    #                                     "tpr": tpr,
+    #                                     "fpr": fpr,
+    #                                     "fnr": fnr,
+    #                                 }
+    #                             )
+    #                             csvfile.flush()
 
 
 if __name__ == "__main__":

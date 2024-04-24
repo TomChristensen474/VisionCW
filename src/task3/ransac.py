@@ -76,7 +76,7 @@ class Ransac:
             transformed_points = []    
 
         def calculate_distance_between_points(point1: Point, point2: Point) -> np.float32:
-            return np.sqrt((point1.x - point2.x) ** 2 + (point1.y - point2.y) ** 2)
+            return np.sqrt((point1.x - point2.x) ** 2) + ((point1.y - point2.y) ** 2)
         
         for index, point in enumerate(transformed_points):
             point2 = points[index].image_point
@@ -146,13 +146,15 @@ class Ransac:
         best_outliers = []
         best_inliers = []
         best_homography = None
-
+        best_outlier_count = float("inf")
         for i in range(iterations):
             inliers, outliers, homography = self.calculate_homography_outliers(points)
             # inlier_ratio = len(inliers) / len(points)
             inlier_count = len(inliers)
+            outlier_count = len(outliers)
 
-            if inlier_count > best_inlier_count:
+            if outlier_count < best_outlier_count:
+                best_outlier_count = outlier_count
                 best_inlier_count = inlier_count
                 best_inliers = inliers
                 best_outliers = outliers

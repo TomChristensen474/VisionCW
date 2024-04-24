@@ -893,14 +893,19 @@ def calculate_patch_similarity(patch1, patch2, ssd_match: bool = True, cross_cor
 
 if __name__ == "__main__":
     configs = [
-        Config(pyramid_levels=4, scale_factors=1, threshold=0.05, metric="mcc"),
-        Config(pyramid_levels=4, scale_factors=1, threshold=0.10, metric="mcc"),
-        Config(pyramid_levels=4, scale_factors=1, threshold=0.15, metric="mcc"),
-        Config(pyramid_levels=4, scale_factors=1, threshold=0.20, metric="mcc"),
-        Config(pyramid_levels=3, scale_factors=1, threshold=0.05, metric="mcc"),
-        Config(pyramid_levels=3, scale_factors=1, threshold=0.10, metric="mcc"),
-        Config(pyramid_levels=3, scale_factors=1, threshold=0.15, metric="mcc"),
-        Config(pyramid_levels=3, scale_factors=1, threshold=0.20, metric="mcc"),
+        Config(pyramid_levels=2, scale_factors=1, threshold=0.05, metric="mcc"),
+        Config(pyramid_levels=2, scale_factors=1, threshold=0.10, metric="mcc"),
+        Config(pyramid_levels=2, scale_factors=1, threshold=0.15, metric="mcc"),
+        Config(pyramid_levels=2, scale_factors=1, threshold=0.20, metric="mcc"),
+        Config(pyramid_levels=1, scale_factors=1, threshold=0.05, metric="mcc"),
+        Config(pyramid_levels=1, scale_factors=1, threshold=0.10, metric="mcc"),
+        Config(pyramid_levels=1, scale_factors=1, threshold=0.15, metric="mcc"),
+        Config(pyramid_levels=1, scale_factors=1, threshold=0.20, metric="mcc"),
+        Config(pyramid_levels=4, scale_factors=1, threshold=0.10, metric="ssd"),
+        Config(pyramid_levels=4, scale_factors=1, threshold=0.15, metric="ssd"),
+        Config(pyramid_levels=4, scale_factors=1, threshold=0.20, metric="ssd"),
+        Config(pyramid_levels=4, scale_factors=1, threshold=0.20, metric="ssd"),
+
         # Config(pyramid_levels=4, scale_factors=4, threshold=0.15, metric="mcc"),
         # Config(pyramid_levels=4, scale_factors=6, threshold=0.15, metric="mcc"),
     ]
