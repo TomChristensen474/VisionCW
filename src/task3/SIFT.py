@@ -7,6 +7,7 @@ import time
 
 Image = np.ndarray
 
+### THIS CLASS IS NOT USED AS WE INSTEAD USED THE SIFT IMPLEMENTATION FROM OPENCV
 
 @dataclass
 class Gradient:
