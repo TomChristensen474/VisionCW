@@ -29,13 +29,14 @@ def testTask2(iconDir, testDir):
     return task2(iconDir, testDir)
 
 
-def testTask3(iconFolderName, testFolderName):
+def testTask3(iconDir, testDir):
     # assume that test folder name has a directory annotations with a list of csv files
     # load train images from iconDir and for each image from testDir, match it with each class from the iconDir to find the best match
     # For each predicted class, check accuracy with the annotations
     # Check and calculate the Intersection Over Union (IoU) score
     # based on the IoU determine accuracy, TruePositives, FalsePositives, FalseNegatives
-    return (Acc,TPR,FPR,FNR)
+    from src.task3.task3 import task3
+    return task3(iconDir, testDir)
 
 
 if __name__ == "__main__":

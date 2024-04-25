@@ -10,7 +10,7 @@ import numpy as np
 import numpy.typing as npt
 import os
 import pandas as pd
-import ransac
+from src.task3 import ransac
 import re
 import time
 
@@ -106,8 +106,6 @@ def descriptor_point_match(described_template_keypoints, described_image_keypoin
     # sort the best matches based on the lowest ssd
     matches.sort(key=lambda x: x.match_ssd)
 
-    # return matches
-    
     unique_matches = []
     source_points = []
     destination_points = []
@@ -203,7 +201,7 @@ def run(
 
     # cv.imshow("image", image)
     # cv.waitKey(0)
-    # get the best matches (image and corresponding template keypoint matches)
+
     # 2. Match keypoints
     matches = descriptor_point_match(described_template_keypoints, described_image_keypoints, ssd_threshold, R)
     if debug:
@@ -249,13 +247,13 @@ def run(
 
     # 5. Apply homography to get bounding box for labelling
     bbox = apply_homography_transform(homography, template_corners)
-    img_copy = image.copy()
-    sampled_inliers_img = image.copy()
 
     if debug:
+        # prevent overwriting the original image when debugging
+        img_copy = image.copy()
+        sampled_inliers_img = image.copy()
         draw_outliers_on_image(img_copy, "outliers/inliers", inliers, (0, 255, 0))
         draw_outliers_on_image(img_copy, "outliers/inliers", outliers, (0, 0, 255))
-
         draw_outliers_on_image(sampled_inliers_img, "sampled_inliers", sampled_inliers, (255, 0, 255))
         draw_points_on_image(image, bbox)
 
@@ -320,14 +318,16 @@ def calc_iou(icon: Icon, bbox: list[int]) -> float:
     return intersection_area / union_area
 
 
-def task3(folderName: str):
+def task3(icon_dir: str, folderName: str):
     this_file = Path(__file__)
-    datasets_folder = this_file.parent.parent.parent / "datasets"
-    dataset_folder = datasets_folder / folderName
+    # datasets_folder = this_file.parent.parent.parent / "datasets"
+    # dataset_folder = datasets_folder / folderName
+    # images_path = dataset_folder / "images"
 
-    images_path = dataset_folder / "images"
-    annotations_path = dataset_folder / "annotations"
-    icon_dataset_path = datasets_folder / "IconDataset" / "png"
+    images_path = Path(folderName) / "images"
+    annotations_path = Path(folderName) / "annotations"
+    icon_dataset_path = icon_dir
+
 
     def feature_match(
         images_path,
@@ -339,9 +339,10 @@ def task3(folderName: str):
         distance_threshold,
         iterations,
         min_inliers,
-    ) -> tuple[float, float, float, float]:
+    ) -> tuple[float, float, float, float, float]:
 
         total_accuracy, total_tpr, total_fpr, total_fnr = 0, 0, 0, 0
+        total_iou, total_iou_count = 0, 0
 
         for file in tqdm(natsorted(os.listdir(images_path)), desc="test image"):
             # Load test image
@@ -397,7 +398,7 @@ def task3(folderName: str):
                     if iou > 0.5:
                         TP += 1  # True positive - made the right match
                     else:
-                        FN += 1  # False positive - made the wrong match
+                        FN += 1  # False negative - made the wrong match
 
                 else:
                     correct_match = False
@@ -417,6 +418,7 @@ def task3(folderName: str):
             )
 
             TP, TN, FP, FN = 0, 0, 0, 0
+            sum_ious, count_ious = 0, 0
 
             # results_generator = tqdm(results_generator, total=len(os.listdir(icon_dataset_path)), desc="icon")
             for result in results_generator:
@@ -437,35 +439,33 @@ def task3(folderName: str):
                 TN += metrics.TN
                 FP += metrics.FP
                 FN += metrics.FN
+                if iou:
+                    sum_ious += iou
+                    count_ious += 1
 
             accuracy = (TP + TN) / (TP + TN + FP + FN) * 100
             tpr = TP / (TP + FN) * 100
             fpr = FP / (FP + TN) * 100
             fnr = FN / (TP + FN) * 100
 
-            print(f"Accuracy: {accuracy}%, TPR: {round(tpr, 2)}%, FPR: {round(fpr, 2)}%, FNR: {round(fnr, 2)}%")
+            print(f"Accuracy: {accuracy}%, TPR: {round(tpr, 2)}%, FPR: {round(fpr, 2)}%, FNR: {round(fnr, 2)}%, IOU: {(sum_ious / count_ious) if count_ious > 0 else None}")
 
             total_accuracy += accuracy
             total_tpr += tpr
             total_fpr += fpr
             total_fnr = fnr
+            total_iou += sum_ious
+            total_iou_count += count_ious
 
         average_accuracy = total_accuracy / len(os.listdir(images_path))
         average_tpr = total_tpr / len(os.listdir(images_path))
         average_fpr = total_fpr / len(os.listdir(images_path))
+        average_iou = (total_iou / total_iou_count)
         print(
-            f"Average Accuracy: {average_accuracy}%, Average TPR: {average_tpr}%, Average FPR: {average_fpr}%, FNR: {total_fnr}%"
+            f"Average Accuracy: {average_accuracy}%, Average TPR: {average_tpr}%, Average FPR: {average_fpr}%, FNR: {total_fnr}%, Average IOU: {average_iou}"
         )
 
-        return average_accuracy, average_tpr, average_fpr, total_fnr
-
-    # octave_layers = np.linspace(3, 9, 4)  # 3, 5, 7, 9
-    # ssd_threshold = np.linspace(10000, 150000, 15)
-    # R = np.linspace(0.5, 0.95, 10)
-    # distance_threshold = np.linspace(2, 30, 10)
-    # iterations = np.linspace(100, 1000, 10)
-    # maxRatio = np.linspace(0.5, 0.95, 10) # not used at the moment
-    # min_inliers = np.linspace(3, 25, 22)
+        return average_accuracy, average_tpr, average_fpr, total_fnr, average_iou
 
     # for testing purposes 
     template_path = icon_dataset_path / "15-barn.png"
@@ -474,71 +474,72 @@ def task3(folderName: str):
     image = cv.imread(str(image_path))
     run(image, template, debug=True, octave_layers=5, ssd_threshold=5, R=0.4, distance_threshold=2, iterations=200, min_inliers=4)
 
-    # octave_layers = [3]
-    # ssd_threshold=[2]
-    # R = [0.4]
-    # distance_threshold=[2]
-    # iterations = [200]
-    # # maxRatio = [0.8]
-    # min_inliers = [6]
+    # Can be used to test multiple hyperparameter sets
+    octave_layers = [5]
+    ssd_threshold=[2]
+    R = [0.4]
+    distance_threshold=[2]
+    iterations = [200]
+    min_inliers = [6]
 
 
-    # with open("results.csv", "a", newline="") as csvfile:
-    #     fieldnames = [
-    #         "when",
-    #         "param_set",
-    #         "octave_layers",
-    #         "ssd_threshold",
-    #         "R",
-    #         "distance_threshold",
-    #         "iterations",
-    #         "min_inliers",
-    #         "accuracy",
-    #         "tpr",
-    #         "fpr",
-    #         "fnr",
-    #     ]
-    #     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    #     # writer.writeheader()
-    #     param_set = 0
-    #     for octave_layer in octave_layers:
-    #         for ssd in ssd_threshold:
-    #             for r in R:
-    #                 for distance in distance_threshold:
-    #                     for iteration in iterations:
-    #                         for min_inlier in min_inliers:
-    #                             # print(str(param_set) + " " + str(octave_layer) + " " + str(ssd) + " " + str(r) + " " + str(distance) + " " + str(iteration) + " " + str(min_inlier) + "\n\n")
-    #                             print(f"octave_layers: {octave_layer}, ssd_threshold: {ssd}, R: {r}, distance_threshold: {distance}, iterations: {iteration}, min_inliers: {min_inlier}")
-    #                             param_set += 1
-    #                             accuracy, tpr, fpr, fnr = feature_match(
-    #                                 images_path,
-    #                                 annotations_path,
-    #                                 icon_dataset_path,
-    #                                 octave_layer,
-    #                                 ssd,
-    #                                 r,
-    #                                 distance,
-    #                                 iteration,
-    #                                 min_inlier,
-    #                             )
-    #                             when = time.strftime("%Y-%m-%d %H:%M:%S")
-    #                             writer.writerow(
-    #                                 {
-    #                                     "when": when,
-    #                                     "octave_layers": octave_layer,
-    #                                     "ssd_threshold": ssd,
-    #                                     "R": r,
-    #                                     "distance_threshold": distance,
-    #                                     "iterations": iteration,
-    #                                     "min_inliers": min_inlier,
-    #                                     "accuracy": accuracy,
-    #                                     "tpr": tpr,
-    #                                     "fpr": fpr,
-    #                                     "fnr": fnr,
-    #                                 }
-    #                             )
-    #                             csvfile.flush()
-
+    with open("results.csv", "a", newline="") as csvfile:
+        fieldnames = [
+            "when",
+            "param_set",
+            "octave_layers",
+            "ssd_threshold",
+            "R",
+            "distance_threshold",
+            "iterations",
+            "min_inliers",
+            "accuracy",
+            "tpr",
+            "fpr",
+            "fnr",
+            "iou",
+        ]
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        # writer.writeheader()
+        param_set = 0
+        for octave_layer in octave_layers:
+            for ssd in ssd_threshold:
+                for r in R:
+                    for distance in distance_threshold:
+                        for iteration in iterations:
+                            for min_inlier in min_inliers:
+                                param_set += 1
+                                print(f"param_set:{param_set}, octave_layers: {octave_layer}, ssd_threshold: {ssd}, R: {r}, distance_threshold: {distance}, iterations: {iteration}, min_inliers: {min_inlier}")
+                                accuracy, tpr, fpr, fnr, iou = feature_match(
+                                    images_path,
+                                    annotations_path,
+                                    icon_dataset_path,
+                                    octave_layer,
+                                    ssd,
+                                    r,
+                                    distance,
+                                    iteration,
+                                    min_inlier,
+                                )
+                                when = time.strftime("%Y-%m-%d %H:%M:%S")
+                                writer.writerow(
+                                    {
+                                        "when": when,
+                                        "octave_layers": octave_layer,
+                                        "ssd_threshold": ssd,
+                                        "R": r,
+                                        "distance_threshold": distance,
+                                        "iterations": iteration,
+                                        "min_inliers": min_inlier,
+                                        "accuracy": accuracy,
+                                        "tpr": tpr,
+                                        "fpr": fpr,
+                                        "fnr": fnr,
+                                        "iou": iou,
+                                    }
+                                )
+                                csvfile.flush()
+    return accuracy, tpr, fpr, fnr
 
 if __name__ == "__main__":
-    task3("Task3Dataset")
+    task3("datasets/IconDataset/png", "datasets/Task3Dataset") # run task3 with the given dataset

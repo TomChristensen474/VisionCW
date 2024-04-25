@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from task3 import TemplateImageKeypointMatch, apply_homography_transform, Point, Homography
+from src.task3.task3 import TemplateImageKeypointMatch, apply_homography_transform, Point, Homography
 
 import numpy as np
 import random
@@ -13,7 +13,7 @@ class Ransac:
 
     def __init__(self, distance_threshold: float = 10):
         self.distance_threshold = distance_threshold
-        self.sample_points_num = 4  # TODO try picking 4 from a larger sample size with best SSD
+        self.sample_points_num = 4
 
     # four point algorithm from lectures
     def four_point_algorithm(self, p: np.ndarray, q: np.ndarray, num_points=4) -> Homography:
@@ -48,8 +48,8 @@ class Ransac:
         inliers = []
 
         def calc_homography(points: list[TemplateImageKeypointMatch]) -> Homography:
-            p = np.zeros((3, 4))
-            q = np.zeros((3, 4))
+            p = np.zeros((3, self.sample_points_num))
+            q = np.zeros((3, self.sample_points_num))
 
             for i, point in enumerate(points):  # should be 4 points in list
                 p[0, i] = point.template_point.x
@@ -60,7 +60,7 @@ class Ransac:
                 q[1, i] = point.image_point.y
                 q[2, i] = 1
 
-            return self.four_point_algorithm(p, q, 4)
+            return self.four_point_algorithm(p, q, self.sample_points_num)
 
         def apply_homography(points: list[TemplateImageKeypointMatch], homography: Homography) -> list[Point]:
             points_to_transform = np.array([[point.template_point.x, point.template_point.y] for point in points])
@@ -68,7 +68,7 @@ class Ransac:
             return apply_homography_transform(homography, points_to_transform)
 
 
-        sampled_points, unsampled_points = self.sample_points(points, 4)
+        sampled_points, unsampled_points = self.sample_points(points, self.sample_points_num)
         homography = calc_homography(sampled_points)
         if len(unsampled_points) > 0:
             transformed_points = apply_homography(unsampled_points, homography)
@@ -79,15 +79,15 @@ class Ransac:
             return np.sqrt((point1.x - point2.x) ** 2) + ((point1.y - point2.y) ** 2)
         
         for index, point in enumerate(transformed_points):
-            point2 = points[index].image_point
+            point2 = unsampled_points[index].image_point
             distance = calculate_distance_between_points(point, point2)
 
             if distance > self.distance_threshold:
-                outliers.append(PointMatch(template_point=points[index].template_point,
-                                           image_point=points[index].image_point))
+                outliers.append(PointMatch(template_point=unsampled_points[index].template_point,
+                                           image_point=unsampled_points[index].image_point))
             else:
-                inliers.append(PointMatch(template_point=points[index].template_point,  
-                                          image_point=points[index].image_point))
+                inliers.append(PointMatch(template_point=unsampled_points[index].template_point,  
+                                          image_point=unsampled_points[index].image_point))
                 
         for point in sampled_points:
             inliers.append(PointMatch(template_point=point.template_point, image_point=point.image_point))
@@ -96,10 +96,6 @@ class Ransac:
 
     # random sampling of points for line fitting and inlier outlier calculation
     def sample_points(self, points: list[TemplateImageKeypointMatch], number: int) -> tuple[list[TemplateImageKeypointMatch], list[TemplateImageKeypointMatch]]:
-        # random_sample = random.sample(points, 30) # random choice
-        # sorted_sample = sorted(random_sample, key=lambda x: x.match_ssd)
-        # return sorted_sample[:4]
-
         sampled = random.sample(points, number)
         unsampled = [point for point in points if point not in sampled]
 
@@ -121,10 +117,10 @@ class Ransac:
         return self.four_point_algorithm(p, q, len(inliers))
     
     def recalc_homography_from_sampled_inliers(self, inliers: list[PointMatch]) -> tuple[Homography, list[PointMatch]]:
-        p = np.zeros((3, 4))
-        q = np.zeros((3, 4))
+        p = np.zeros((3, self.sample_points_num))
+        q = np.zeros((3, self.sample_points_num))
 
-        sampled_inliers = random.sample(inliers, 4)
+        sampled_inliers = random.sample(inliers, self.sample_points_num)
 
         for i, point in enumerate(sampled_inliers):
             p[0, i] = point.template_point.x
@@ -139,32 +135,21 @@ class Ransac:
 
 
 
-    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100, maxRatio=0.8) -> tuple[Homography, list[PointMatch], list[PointMatch], list[PointMatch]]:
+    def run_ransac(self, points: list[TemplateImageKeypointMatch], iterations=100, maxRatio=0.5) -> tuple[Homography, list[PointMatch], list[PointMatch], list[PointMatch]]:
 
-        # best_inlier_ratio = 0
         best_inlier_count = 0
         best_outliers = []
         best_inliers = []
         best_homography = None
-        best_outlier_count = float("inf")
         for i in range(iterations):
             inliers, outliers, homography = self.calculate_homography_outliers(points)
-            # inlier_ratio = len(inliers) / len(points)
             inlier_count = len(inliers)
-            outlier_count = len(outliers)
 
-            if outlier_count < best_outlier_count:
-                best_outlier_count = outlier_count
+            if inlier_count > best_inlier_count:
                 best_inlier_count = inlier_count
                 best_inliers = inliers
                 best_outliers = outliers
                 best_homography = homography
-
-            # if inlier_ratio > best_inlier_ratio and inlier_ratio >= (1 - maxRatio) and np.random.uniform(0,1) > 0.8:
-            #     best_inlier_ratio = inlier_ratio
-            #     best_inliers = inliers
-            #     best_outliers = outliers
-            #     best_homography = homography
         
         if not best_homography:  # if empty arry or best line is none
             raise ValueError("no homography found")
