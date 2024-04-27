@@ -21,7 +21,7 @@ Image = np.ndarray
 @dataclass
 class Config:
     debug_level: int = 0
-    pyramid_levels: int = 2
+    pyramid_levels: int = 4
     scale_factors: int | Literal["variable"] = "variable"
     threshold: float | Literal["variable"] = "variable"
     metric: Literal["mcc", "ssd"] = "mcc"
@@ -32,7 +32,7 @@ class Config:
         return self.debug_level >= level
 
 
-# config = Config()
+config = Config()
 
 
 def print(s=""):

@@ -1,6 +1,12 @@
 import argparse
+import sys
+from pathlib import Path
 
 import pandas as pd
+
+
+main_py_path = Path(__file__)
+src_dir = main_py_path.parent / "src"
 
 
 def testTask1(folderName):
@@ -14,6 +20,9 @@ def testTask1(folderName):
     
     # return(totalError)
     
+    task1_dir = src_dir / "task1"
+    sys.path.append(str(task1_dir))
+
     from src.task1.task1 import task1
     return task1(folderName)
 
@@ -25,6 +34,9 @@ def testTask2(iconDir, testDir):
     # based on the IoU determine accuracy, TruePositives, FalsePositives, FalseNegatives
     # return (Acc,TPR,FPR,FNR)
 
+    task2_dir = src_dir / "task2"
+    sys.path.append(str(task2_dir))
+
     from src.task2.task2 import task2
     return task2(iconDir, testDir)
 
@@ -35,6 +47,10 @@ def testTask3(iconDir, testDir):
     # For each predicted class, check accuracy with the annotations
     # Check and calculate the Intersection Over Union (IoU) score
     # based on the IoU determine accuracy, TruePositives, FalsePositives, FalseNegatives
+
+    task3_dir = src_dir / "task3"
+    sys.path.append(str(task3_dir))
+
     from src.task3.task3 import task3
     return task3(iconDir, testDir)
 

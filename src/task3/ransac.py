@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from src.task3.task3 import TemplateImageKeypointMatch, apply_homography_transform, Point, Homography
+from task3 import TemplateImageKeypointMatch, apply_homography_transform, Point, Homography
 
 import numpy as np
 import random

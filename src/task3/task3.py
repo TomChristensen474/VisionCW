@@ -320,13 +320,15 @@ def calc_iou(icon: Icon, bbox: list[int]) -> float:
 
 def task3(icon_dir: str, folderName: str):
     this_file = Path(__file__)
-    # datasets_folder = this_file.parent.parent.parent / "datasets"
-    # dataset_folder = datasets_folder / folderName
-    # images_path = dataset_folder / "images"
+    datasets_folder = this_file.parent.parent.parent / "datasets"
+    dataset_folder = datasets_folder / folderName
+    images_path = dataset_folder / "images"
+    annotations_path = dataset_folder / "annotations"
+    icon_dataset_path = datasets_folder / icon_dir / "png"
 
-    images_path = Path(folderName) / "images"
-    annotations_path = Path(folderName) / "annotations"
-    icon_dataset_path = icon_dir
+    # images_path = Path(folderName) / "images"
+    # annotations_path = Path(folderName) / "annotations"
+    # icon_dataset_path = Path(icon_dir)
 
 
     def feature_match(
@@ -466,13 +468,6 @@ def task3(icon_dir: str, folderName: str):
         )
 
         return average_accuracy, average_tpr, average_fpr, total_fnr, average_iou
-
-    # for testing purposes 
-    template_path = icon_dataset_path / "15-barn.png"
-    image_path = images_path / "test_image_1.png"
-    template = cv.imread(str(template_path))
-    image = cv.imread(str(image_path))
-    run(image, template, debug=True, octave_layers=5, ssd_threshold=5, R=0.4, distance_threshold=2, iterations=200, min_inliers=4)
 
     # Can be used to test multiple hyperparameter sets
     octave_layers = [5]
